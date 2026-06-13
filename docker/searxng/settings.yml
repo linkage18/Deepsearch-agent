@@ -1,0 +1,19 @@
+# SearXNG 自定义配置
+search:
+  formats:
+    - html
+    - json
+
+server:
+  port: 8080
+  bind_address: "0.0.0.0"
+  limiter: false
+  public_instance: false
+  secret_key: "deepsearch-local-searxng-change-in-production"
+  method: "GET"
+
+doi_resolvers:
+  oadoi.org: 'https://oadoi.org/'
+  doi.org: 'https://doi.org/'
+
+default_doi_resolver: 'oadoi.org'

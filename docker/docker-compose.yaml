@@ -1,0 +1,117 @@
+# DeepSearch Agents 全栈 Docker 环境
+#
+# 启动：docker compose -f docker/docker-compose.yaml up -d
+# 停止：docker compose -f docker/docker-compose.yaml down
+# 前端：http://localhost:5173（开发模式）
+# 后端：http://localhost:8000
+#
+# 首次启动需要：
+#   1. 复制 .env.example 为 .env 并填写 API Key
+#   2. docker compose -f docker/docker-compose.yaml --env-file .env up -d
+
+name: deepsearch-agents
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: deepsearch-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD:-root}
+      MYSQL_ROOT_HOST: "%"
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-deepsearch_db}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+      - --sql-mode=TRADITIONAL
+    ports:
+      - "${MYSQL_PORT:-3307}:3306"
+    volumes:
+      - deepsearch_mysql_data:/var/lib/mysql
+      - ./mysql/mysql.sql:/docker-entrypoint-initdb.d/01-init-pharma.sql:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - deepsearch-net
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: deepsearch-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env
+    environment:
+      # Docker 内 MySQL 主机名使用服务名，而非 localhost
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      # SearXNG 搜索服务地址（Docker 内通过服务名访问）
+      SEARXNG_BASE_URL_DOCKER: http://searxng:8080
+    volumes:
+      # 会话产物持久化
+      - deepsearch_output:/app/output
+      - deepsearch_updated:/app/updated
+      # 缓存 sentence-transformers 模型避免反复下载
+      - deepsearch_model_cache:/root/.cache/huggingface
+      # 持久化 LlamaIndex 索引，避免每次重启重建
+      - deepsearch_storage:/app/app/storage
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - deepsearch-net
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.frontend
+    container_name: deepsearch-frontend
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    depends_on:
+      - backend
+    networks:
+      - deepsearch-net
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: deepsearch-searxng
+    restart: unless-stopped
+    ports:
+      - "8888:8080"
+    volumes:
+      - searxng_data:/etc/searxng
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8888
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    networks:
+      - deepsearch-net
+
+volumes:
+  deepsearch_mysql_data:
+  deepsearch_output:
+  deepsearch_updated:
+  deepsearch_model_cache:
+  deepsearch_storage:
+  searxng_data:
+
+networks:
+  deepsearch-net:
+    driver: bridge

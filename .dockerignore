@@ -1,0 +1,47 @@
+# Docker 构建忽略清单 —— 排除本地开发文件，减小构建上下文
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 依赖目录
+node_modules/
+frontend/node_modules/
+
+# 版本控制
+.git/
+.gitignore
+.gitattributes
+
+# 运行时产物
+output/
+updated/
+app/storage/paper_index/
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 环境变量（密钥，不应进入镜像）
+.env
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 文档（运行时不需要）
+docs/images/
+examples/
+
+# 日志
+*.log
+
+# 测试
+tests/
+_test_*.py
