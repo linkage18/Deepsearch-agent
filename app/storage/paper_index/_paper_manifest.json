@@ -1,0 +1,60 @@
+{
+  "digest": "74acd97718b146f74de3c530a7c303264a06f9b910395e9dfb164a2963e80fb4",
+  "files": [
+    {
+      "path": "cot-prompting.md",
+      "size": 1535,
+      "mtime": 1780849665
+    },
+    {
+      "path": "Do 等 - 2024 - MIM-Reasoner Learning with Theoretical Guarantees for Multiplex Influence Maximization.pdf",
+      "size": 10657305,
+      "mtime": 1762071498
+    },
+    {
+      "path": "gbim-method.md",
+      "size": 1405,
+      "mtime": 1780849612
+    },
+    {
+      "path": "generative-agents.md",
+      "size": 1493,
+      "mtime": 1780849693
+    },
+    {
+      "path": "Li 等 - 2026 - Deep reinforcement learning via structure-aware cross-layer node representation for influence maximi.pdf",
+      "size": 4060081,
+      "mtime": 1778899967
+    },
+    {
+      "path": "react-pattern.md",
+      "size": 1354,
+      "mtime": 1780849581
+    },
+    {
+      "path": "README.md",
+      "size": 364,
+      "mtime": 1780489998
+    },
+    {
+      "path": "reflexion-pattern.md",
+      "size": 1420,
+      "mtime": 1780849590
+    },
+    {
+      "path": "retro-method.md",
+      "size": 1563,
+      "mtime": 1780849818
+    },
+    {
+      "path": "toolformer-method.md",
+      "size": 1419,
+      "mtime": 1780849657
+    },
+    {
+      "path": "Yuan 等 - 2024 - Graph Bayesian Optimization for Multiplex Influence Maximization.pdf",
+      "size": 401269,
+      "mtime": 1762071490
+    }
+  ]
+}

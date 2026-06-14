@@ -1,0 +1,23 @@
+{
+  "sessions": [
+    {
+      "id": "test-turn-001",
+      "title": "测试对话记录保存",
+      "query_preview": "测试对话记录保存",
+      "created_at": "2026-06-10T06:06:29.074702+00:00",
+      "updated_at": "2026-06-10T06:06:29.078231+00:00",
+      "file_count": 0,
+      "completed": false,
+      "turns": [
+        {
+          "query": "问题1",
+          "result": "回答1：这是测试结果"
+        },
+        {
+          "query": "问题2",
+          "result": "回答2：第二个测试结果"
+        }
+      ]
+    }
+  ]
+}

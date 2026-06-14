@@ -61,14 +61,6 @@ yarn-error.log
 testem.log
 /typings
 
-# runtime data
-/output/
-/$null
-/paper/
-app/storage/paper_index/
-docs/experiment_results.json
-frontend/.env.local
-
 # System Files
 .DS_Store
 Thumbs.db

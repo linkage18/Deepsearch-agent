@@ -1,0 +1,27 @@
+{
+  "date": "2026-06-08",
+  "dataset": "10 documents (3 PDF + 7 Markdown), 20 EN + 5 CN queries",
+  "environment": "local embedding (all-MiniLM-L6-v2), chunk=512, overlap=64, BM25+vector hybrid",
+  "improvements": {
+    "before_mock": {
+      "vector_R@3": 0.075,
+      "hybrid_R@3": 0.275,
+      "hybrid_MRR": 0.275,
+      "cn_R@3": 0.0
+    },
+    "after_local_emb": {
+      "vector_R@3": 0.15,
+      "hybrid_R@3": 0.375,
+      "hybrid_MRR": 0.3917,
+      "cn_R@3": 0.2
+    }
+  },
+  "changelog": [
+    ".env: LLAMAINDEX_EMBED_MODEL=mock -> local",
+    "llamaindex_tools: added HuggingFaceEmbedding support (mode=local)",
+    "llamaindex_tools: added SentenceSplitter(chunk=512, overlap=64) for balanced chunking",
+    "llamaindex_tools: added cross-lingual fallback (BM25 max<0.1 -> pure vector)",
+    "rerank_tools: _load_reranker now caches model as function attribute",
+    "search_tool: timeout 15s -> 8s"
+  ]
+}
