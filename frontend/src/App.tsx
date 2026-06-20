@@ -13,7 +13,6 @@ import { useEffect, useRef, useState } from "react";
 import { ChatComposer } from "./components/ChatComposer";
 import { ConversationThread } from "./components/ConversationThread";
 import { KnowledgeUpload } from "./components/KnowledgeUpload";
-import { RetrievalTester } from "./components/RetrievalTester";
 import { SessionList } from "./components/SessionList";
 import type { ChatTurn } from "./components/ConversationThread";
 import { API_BASE_URL, WS_BASE_URL } from "./lib/config";
@@ -245,8 +244,6 @@ export default function App() {
         </div>
 
         <KnowledgeUpload />
-
-        <RetrievalTester />
 
         <div className="sidebar-section sidebar-endpoints">
           <span className="sidebar-label">ENDPOINTS</span>
