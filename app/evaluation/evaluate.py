@@ -224,30 +224,54 @@ def compute_metrics(
     return metrics
 
 
-def print_table(results: dict[str, dict], ks: list[int]):
-    """打印对比表格"""
-    header = f"{'Strategy':<20}" + "".join(
-        [f" | {'Recall@'+str(k):<10}" for k in ks]
-        + [f" | {'MRR':<10}"]
-    )
-    sep = "-" * len(header)
-    print(header)
-    print(sep)
-    for strategy, metrics in results.items():
-        row = f"{strategy:<20}"
-        for k in ks:
-            row += f" | {metrics[k]['recall']:<10.4f}"
-        row += f" | {metrics[ks[0]]['mrr']:<10.4f}"
-        print(row)
-    print(sep)
+def print_table(results: dict[str, dict], ks: list[int], fmt: str = "text"):
+    """打印对比表格，支持 text 和 markdown 两种格式。"""
+    if fmt == "markdown":
+        header = "| " + "Strategy" + "".join(
+            [f" | Recall@{str(k)}" for k in ks] + [" | MRR |"]
+        )
+        sep = "| " + "---" + "".join([" | ---" for _ in ks] + [" | --- |"])
+        print(header)
+        print(sep)
+        for strategy, metrics in results.items():
+            row = f"| {strategy}"
+            for k in ks:
+                row += f" | {metrics[k]['recall']:.4f}"
+            row += f" | {metrics[ks[0]]['mrr']:.4f} |"
+            print(row)
+    else:
+        header = f"{'Strategy':<20}" + "".join(
+            [f" | {'Recall@'+str(k):<10}" for k in ks]
+            + [f" | {'MRR':<10}"]
+        )
+        sep = "-" * len(header)
+        print(header)
+        print(sep)
+        for strategy, metrics in results.items():
+            row = f"{strategy:<20}"
+            for k in ks:
+                row += f" | {metrics[k]['recall']:<10.4f}"
+            row += f" | {metrics[ks[0]]['mrr']:<10.4f}"
+            print(row)
+        print(sep)
 
 
 def main():
+    import argparse
     import time
 
-    print("=" * 60)
-    print("RAG 检索策略评测")
-    print("=" * 60)
+    parser = argparse.ArgumentParser(description="RAG 检索策略评测")
+    parser.add_argument(
+        "--format", choices=["text", "md", "markdown"], default="text",
+        help="输出格式：text（终端表格）或 md / markdown（Markdown 表格）",
+    )
+    args = parser.parse_args()
+    output_fmt = "markdown" if args.format in ("md", "markdown") else "text"
+
+    if output_fmt == "text":
+        print("=" * 60)
+        print("RAG 检索策略评测")
+        print("=" * 60)
 
     ground_truth = load_ground_truth()
     queries = [g["query"] for g in ground_truth]
@@ -281,10 +305,13 @@ def main():
         elapsed = time.time() - t0
         print(f"  耗时: {elapsed:.1f}s")
 
-    print("\n\n" + "=" * 60)
-    print("评测结果")
-    print("=" * 60)
-    print_table(all_results, ks)
+    if output_fmt == "markdown":
+        print("\n")
+    else:
+        print("\n\n" + "=" * 60)
+        print("评测结果")
+        print("=" * 60)
+    print_table(all_results, ks, fmt=output_fmt)
 
     # 找最优策略：以 MRR 为主要指标
     print("\n推荐配置:")
