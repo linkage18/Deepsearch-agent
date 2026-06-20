@@ -12,7 +12,12 @@ import { Alert, App as AntApp, Button } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { ChatComposer } from "./components/ChatComposer";
 import { ConversationThread } from "./components/ConversationThread";
+import { EvidenceArchive } from "./components/EvidenceArchive";
 import { KnowledgeUpload } from "./components/KnowledgeUpload";
+import { PaperCardPanel } from "./components/PaperCardPanel";
+import { PaperMatrixPanel } from "./components/PaperMatrixPanel";
+import { RetrievalTester } from "./components/RetrievalTester";
+import { ReviewReportPanel } from "./components/ReviewReportPanel";
 import { SessionList } from "./components/SessionList";
 import type { ChatTurn } from "./components/ConversationThread";
 import { API_BASE_URL, WS_BASE_URL } from "./lib/config";
@@ -244,6 +249,16 @@ export default function App() {
         </div>
 
         <KnowledgeUpload />
+
+        <RetrievalTester />
+
+        <PaperCardPanel threadId={session.threadId} />
+
+        <PaperMatrixPanel />
+
+        <ReviewReportPanel threadId={session.threadId} />
+
+        <EvidenceArchive />
 
         <div className="sidebar-section sidebar-endpoints">
           <span className="sidebar-label">ENDPOINTS</span>

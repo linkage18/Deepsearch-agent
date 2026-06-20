@@ -16,8 +16,10 @@ from dotenv import find_dotenv, load_dotenv
 from langchain_core.tools import tool
 
 from app.api.monitor import monitor
+from app.config.paths import INDEX_DIR, MODEL_CACHE_DIR, PAPER_DIR, ensure_runtime_dirs
 
 load_dotenv(find_dotenv())
+ensure_runtime_dirs()
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = APP_ROOT.parent
@@ -33,14 +35,6 @@ def _resolve_project_path(value: str | None, default: Path) -> Path:
     return path.resolve()
 
 
-PAPER_DIR = _resolve_project_path(
-    os.getenv("LLAMAINDEX_PAPER_DIR"),
-    PROJECT_ROOT / "docs" / "papers",
-)
-INDEX_DIR = _resolve_project_path(
-    os.getenv("LLAMAINDEX_INDEX_DIR"),
-    APP_ROOT / "storage" / "paper_index",
-)
 MANIFEST_PATH = INDEX_DIR / "_paper_manifest.json"
 DEFAULT_TOP_K = int(os.getenv("LLAMAINDEX_SIMILARITY_TOP_K", "5"))
 
@@ -88,6 +82,7 @@ def _configure_embedding(imports: dict[str, Any]) -> None:
     Settings = imports["Settings"]
     MockEmbedding = imports["MockEmbedding"]
     mode = os.getenv("LLAMAINDEX_EMBED_MODEL", "mock").lower()
+    allow_mock = os.getenv("ALLOW_MOCK_EMBEDDING", "false").lower() == "true"
 
     if mode == "openai":
         try:
@@ -99,8 +94,9 @@ def _configure_embedding(imports: dict[str, Any]) -> None:
                 api_base=os.getenv("OPENAI_BASE_URL"),
             )
             return
-        except Exception:
-            pass
+        except Exception as exc:
+            if not allow_mock:
+                raise RuntimeError(f"OpenAI embedding 加载失败：{exc}") from exc
 
     if mode == "local":
         try:
@@ -109,12 +105,26 @@ def _configure_embedding(imports: dict[str, Any]) -> None:
                 "LLAMAINDEX_LOCAL_EMBED_MODEL",
                 "sentence-transformers/all-MiniLM-L6-v2",
             )
-            Settings.embed_model = HuggingFaceEmbedding(model_name=model_name)
+            Settings.embed_model = HuggingFaceEmbedding(
+                model_name=model_name,
+                cache_folder=str(MODEL_CACHE_DIR),
+            )
             print(f"[Embedding] 已加载本地模型: {model_name}")
             return
         except Exception as exc:
+            if not allow_mock:
+                raise RuntimeError(f"本地 embedding 模型加载失败：{exc}") from exc
             print(f"[Embedding] 本地模型加载失败: {exc}，降级到 mock")
 
+    if mode != "mock" and not allow_mock:
+        raise RuntimeError(
+            f"不支持的 LLAMAINDEX_EMBED_MODEL={mode}，请配置为 local/openai/mock。"
+        )
+    if mode == "mock" and not allow_mock:
+        raise RuntimeError(
+            "当前配置使用 MockEmbedding。生产或压测请配置 local/openai，"
+            "如仅做本地流程演示，可设置 ALLOW_MOCK_EMBEDDING=true。"
+        )
     Settings.embed_model = MockEmbedding(embed_dim=384)
 
 
@@ -145,9 +155,20 @@ def _manifest() -> dict[str, Any]:
             }
         )
 
-    raw = json.dumps(entries, ensure_ascii=False, sort_keys=True)
+    config = {
+        "embedding_mode": os.getenv("LLAMAINDEX_EMBED_MODEL", "mock").lower(),
+        "openai_model": os.getenv("LLAMAINDEX_OPENAI_EMBED_MODEL", ""),
+        "local_model": os.getenv(
+            "LLAMAINDEX_LOCAL_EMBED_MODEL",
+            "sentence-transformers/all-MiniLM-L6-v2",
+        ),
+        "chunk_size": int(os.getenv("LLAMAINDEX_CHUNK_SIZE", "512")),
+        "chunk_overlap": int(os.getenv("LLAMAINDEX_CHUNK_OVERLAP", "64")),
+    }
+    raw = json.dumps({"files": entries, "config": config}, ensure_ascii=False, sort_keys=True)
     return {
         "digest": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+        "config": config,
         "files": entries,
     }
 
@@ -246,6 +267,118 @@ def _format_nodes(
     return "\n\n".join(parts)
 
 
+def _node_to_evidence(
+    node_with_score: Any,
+    index: int,
+    source_type: str = "knowledge_base",
+) -> dict[str, Any]:
+    """Convert one retrieved node to structured evidence."""
+    node = getattr(node_with_score, "node", node_with_score)
+    score = getattr(node_with_score, "score", None)
+    metadata = getattr(node, "metadata", {}) or {}
+    source = (
+        metadata.get("file_name")
+        or metadata.get("file_path")
+        or metadata.get("document_title")
+        or "未知来源"
+    )
+    page = metadata.get("page_label") or metadata.get("page_number") or ""
+    text = getattr(node, "text", "") or node.get_content()
+    excerpt = " ".join(text.split())[:900]
+    return {
+        "evidence_id": f"kb-{index}",
+        "source_type": source_type,
+        "source": str(source),
+        "page": str(page) if page else "",
+        "score": float(score) if isinstance(score, int | float) else None,
+        "quote": excerpt,
+        "metadata": {
+            key: str(value)
+            for key, value in metadata.items()
+            if key in {"file_name", "file_path", "document_title", "page_label", "page_number"}
+        },
+    }
+
+
+def _nodes_to_evidence(
+    nodes: list[Any],
+    source_type: str = "knowledge_base",
+) -> list[dict[str, Any]]:
+    return [
+        _node_to_evidence(node_with_score, index, source_type)
+        for index, node_with_score in enumerate(nodes, start=1)
+    ]
+
+
+def _retrieve_nodes(query: str, top_k: int):
+    """Run the same retrieval pipeline used by search_paper_library."""
+    from app.config.retrieval_config import RETRIEVAL_CONFIG
+
+    index = _load_or_build_index()
+    cfg = RETRIEVAL_CONFIG
+    candidate_k = max(1, min(int(top_k) * cfg["candidate_multiplier"], 20))
+    retriever = index.as_retriever(similarity_top_k=candidate_k)
+    nodes = retriever.retrieve(query)
+
+    if not nodes:
+        return []
+
+    texts = []
+    for n in nodes:
+        node = getattr(n, "node", n)
+        texts.append(getattr(node, "text", "") or node.get_content())
+
+    bm25_tokenizer = cfg.get("bm25_tokenizer")
+    if bm25_tokenizer == "jieba":
+        import jieba
+
+        tokenize_fn = lambda x: list(jieba.cut(x))
+    else:
+        tokenize_fn = lambda x: x.lower().split()
+
+    from rank_bm25 import BM25Okapi
+
+    tokenized_corpus = [tokenize_fn(t) for t in texts]
+    bm25 = BM25Okapi(tokenized_corpus)
+    bm25_scores = bm25.get_scores(tokenize_fn(query))
+
+    if max(bm25_scores) < 0.1:
+        return nodes[: max(1, min(int(top_k), len(nodes)))]
+
+    k = cfg["rrf_k"]
+    bm25_rank_args = sorted(
+        range(len(bm25_scores)),
+        key=lambda j: bm25_scores[j],
+        reverse=True,
+    )
+    fused = []
+    for i, n in enumerate(nodes):
+        vector_rank = i + 1
+        try:
+            bm25_rank = bm25_rank_args.index(i) + 1
+        except ValueError:
+            bm25_rank = len(nodes)
+        rrf_score = 1.0 / (k + vector_rank) + 1.0 / (k + bm25_rank)
+        fused.append((n, rrf_score))
+
+    fused.sort(key=lambda x: x[1], reverse=True)
+    return [fn[0] for fn in fused[: max(1, min(int(top_k), len(fused)))]]
+
+
+def search_paper_evidence_structured(
+    query: str,
+    top_k: int = DEFAULT_TOP_K,
+) -> dict[str, Any]:
+    """Return structured evidence for API/debug usage."""
+    nodes = _retrieve_nodes(query, top_k)
+    return {
+        "query": query,
+        "top_k": top_k,
+        "evidence": _nodes_to_evidence(nodes),
+        "text": _format_nodes(nodes),
+    }
+
+
 @tool
 def list_paper_library_files() -> str:
     """
@@ -280,108 +413,16 @@ def search_paper_library(
     :param top_k: 召回片段数量
     :return: 格式化后的证据片段列表
     """
-    from app.config.retrieval_config import RETRIEVAL_CONFIG
-
     monitor.report_tool(
         "LlamaIndex论文库检索工具：search_paper_library",
         {"query": query, "top_k": top_k},
     )
 
     try:
-        index = _load_or_build_index()
-        cfg = RETRIEVAL_CONFIG
-        candidate_k = max(1, min(int(top_k) * cfg["candidate_multiplier"], 20))
-        retriever = index.as_retriever(similarity_top_k=candidate_k)
-        nodes = retriever.retrieve(query)
-
+        nodes = _retrieve_nodes(query, top_k)
         if not nodes:
             return "未从论文知识库中召回相关片段。"
-
-        # ----- Step 1: BM25 RRF 融合 -----
-        texts = []
-        for n in nodes:
-            node = getattr(n, "node", n)
-            t = getattr(node, "text", "") or node.get_content()
-            texts.append(t)
-
-        # 使用配置中的 tokenizer
-        bm25_tokenizer = cfg.get("bm25_tokenizer")
-        if bm25_tokenizer == "jieba":
-            import jieba
-            tokenize_fn = lambda x: list(jieba.cut(x))
-        else:
-            tokenize_fn = lambda x: x.lower().split()
-
-        tokenized_corpus = [tokenize_fn(t) for t in texts]
-        from rank_bm25 import BM25Okapi
-        bm25 = BM25Okapi(tokenized_corpus)
-        tokenized_query = tokenize_fn(query)
-        bm25_scores = bm25.get_scores(tokenized_query)
-
-        # 跨语言兜底：BM25 完全无法匹配时降级到向量检索
-        if max(bm25_scores) < 0.1:
-            monitor._emit(
-                "warn",
-                f"BM25 无法匹配 query（最高分={max(bm25_scores):.2f}），"
-                f"降级到纯向量检索",
-            )
-            return _format_nodes(nodes, source_type="knowledge_base")
-
-        k = cfg["rrf_k"]
-        fused = []
-        for i, n in enumerate(nodes):
-            vector_rank = i + 1
-            bm25_rank_args = sorted(
-                range(len(bm25_scores)), key=lambda j: bm25_scores[j], reverse=True
-            )
-            try:
-                bm25_rank = bm25_rank_args.index(i) + 1
-            except ValueError:
-                bm25_rank = len(nodes)
-            rrf_score = 1.0 / (k + vector_rank) + 1.0 / (k + bm25_rank)
-            fused.append((n, rrf_score))
-
-        fused.sort(key=lambda x: x[1], reverse=True)
-        fused_nodes = [fn[0] for fn in fused[:max(1, min(int(top_k), len(fused)))]]
-
-        # ----- Step 2: MiniLM 重排序（可选，默认关闭以加快首次响应） -----
-        if cfg.get("enable_reranker", False):
-            try:
-                from app.tools.rerank_tools import rerank_candidates
-
-                candidate_texts = []
-                for n in fused_nodes:
-                    node = getattr(n, "node", n)
-                    t = getattr(node, "text", "") or node.get_content()
-                    meta = getattr(node, "metadata", {}) or {}
-                    source = (
-                        meta.get("file_name")
-                        or meta.get("file_path")
-                        or meta.get("document_title")
-                        or "未知来源"
-                    )
-                    score = getattr(n, "score", 0.0) or 0.0
-                    candidate_texts.append((t, source, score))
-
-                reranked = rerank_candidates(query, candidate_texts, top_k=int(top_k))
-                reranked_nodes = []
-                for text, source, r_score in reranked:
-                    for n in fused_nodes:
-                        node = getattr(n, "node", n)
-                        nt = getattr(node, "text", "") or node.get_content()
-                        if nt == text:
-                            n.score = r_score
-                            reranked_nodes.append(n)
-                            break
-                    else:
-                        reranked_nodes.append(n)
-                final_nodes = reranked_nodes
-            except Exception:
-                final_nodes = fused_nodes
-        else:
-            final_nodes = fused_nodes
-
-        return _format_nodes(final_nodes, source_type="knowledge_base")
+        return _format_nodes(nodes, source_type="knowledge_base")
     except Exception as exc:
         return f"LlamaIndex 论文库检索失败：{str(exc)}"
 

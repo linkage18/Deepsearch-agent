@@ -60,14 +60,12 @@ services:
       MYSQL_PORT: "3306"
       # SearXNG 搜索服务地址（Docker 内通过服务名访问）
       SEARXNG_BASE_URL_DOCKER: http://searxng:8080
+      DATA_ROOT: /app/data
     volumes:
-      # 会话产物持久化
-      - deepsearch_output:/app/output
-      - deepsearch_updated:/app/updated
+      # 上传文件、报告、论文库、索引和 SQLite 元数据统一持久化
+      - deepsearch_data:/app/data
       # 缓存 sentence-transformers 模型避免反复下载
       - deepsearch_model_cache:/root/.cache/huggingface
-      # 持久化 LlamaIndex 索引，避免每次重启重建
-      - deepsearch_storage:/app/app/storage
     depends_on:
       mysql:
         condition: service_healthy
@@ -106,10 +104,8 @@ services:
 
 volumes:
   deepsearch_mysql_data:
-  deepsearch_output:
-  deepsearch_updated:
+  deepsearch_data:
   deepsearch_model_cache:
-  deepsearch_storage:
   searxng_data:
 
 networks:

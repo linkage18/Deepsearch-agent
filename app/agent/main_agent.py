@@ -9,7 +9,6 @@ session_id 创建独立工作目录，并把工具调用、子智能体调用和
 import asyncio
 import re
 import shutil
-from pathlib import Path
 
 from deepagents import create_deep_agent
 from langgraph.checkpoint.memory import InMemorySaver
@@ -25,6 +24,7 @@ from app.api.context import (
     set_thread_context,
 )
 from app.api.monitor import monitor
+from app.config.paths import REPORT_DIR, UPLOAD_DIR, ensure_runtime_dirs
 
 # 跨会话长期记忆
 from app.memory.memory_store import memory_store
@@ -49,8 +49,8 @@ main_agent = create_deep_agent(
     subagents=[database_query_agent, network_search_agent, paper_knowledge_agent],
 )
 
-# 当前文件位于 app/agent/main_agent.py，parents[1] 即 app 目录
-project_root_path = Path(__file__).parents[1].resolve()
+ensure_runtime_dirs()
+project_root_path = REPORT_DIR.parent
 
 
 async def run_deep_agent(task_query, session_id):
@@ -71,18 +71,21 @@ async def run_deep_agent(task_query, session_id):
         print(f"[Session] 保存会话元数据异常（跳过）: {exc}")
 
     # 每个会话独立使用 output/session_{session_id}，避免不同用户的产物互相覆盖
-    session_dir = project_root_path / "output" / f"session_{session_id}"
+    session_dir = REPORT_DIR / f"session_{session_id}"
     session_dir.mkdir(parents=True, exist_ok=True)
 
     # 前端和工具使用绝对路径；提示词里只给模型相对路径，降低模型误用系统绝对路径的概率
     session_dir_str = str(session_dir).replace("\\", "/")
-    relative_session_dir_str = str(session_dir.relative_to(project_root_path)).replace(
-        "\\", "/"
-    )
+    try:
+        relative_session_dir_str = str(session_dir.relative_to(project_root_path)).replace(
+            "\\", "/"
+        )
+    except ValueError:
+        relative_session_dir_str = str(session_dir).replace("\\", "/")
 
     # 上传文件先落在 updated/session_{session_id}，执行前复制到本次 output 工作目录
     # 这样读文件工具和生成文件工具都只需要围绕同一个 session_dir 工作
-    updated_dir_path = project_root_path / "updated" / f"session_{session_id}"
+    updated_dir_path = UPLOAD_DIR / f"session_{session_id}"
     updated_info_prompt = ""
     if updated_dir_path.exists():
         files = [f.name for f in updated_dir_path.iterdir() if f.is_file()]
@@ -222,7 +225,7 @@ async def run_deep_agent(task_query, session_id):
 
     # 更新会话元数据（文件数和完成状态）
     try:
-        session_dir_path = project_root_path / "output" / f"session_{session_id}"
+        session_dir_path = REPORT_DIR / f"session_{session_id}"
         file_count = 0
         if session_dir_path.exists():
             file_count = len([f for f in session_dir_path.iterdir()

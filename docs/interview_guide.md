@@ -556,3 +556,257 @@ A: ReportLab 不需要安装系统级依赖（WeasyPrint 需要 libpango、Puppe
 
 **Q: long-term memory 的 search 只用了关键词子串匹配，如果用户换一种说法问同一个问题怎么办？**
 A: 确实会有遗漏。当前设计的前提是记忆条目数 ≤50，在这个规模下关键词匹配足够处理大多数重复查询。如果扩展到上百条，应引入语义检索。
+
+---
+
+## 六、LangGraph 八股文：核心原理与面试高频题
+
+> 本节脱离本项目上下文，聚焦 LangGraph 作为图框架本身的技术原理。面试中被问到 LangGraph 时，以下内容属于"必知必会"。
+
+### 6.1 LangGraph 是什么？解决了什么问题？
+
+LangGraph 是 LangChain 团队开发的**有状态编排框架**，用于构建 LLM 应用中的**多步推理、工具调用循环、多智能体协作**等复杂流程。
+
+| 对比 | LangChain AgentExecutor | LangGraph |
+|------|------------------------|-----------|
+| 执行模型 | 循环：LLM → 工具 → LLM → 工具 ... | 有向图：任意拓扑（循环、分支、并行） |
+| 状态管理 | 隐式，messages 自动累积 | 显式 State 定义 + Reducer 控制 |
+| 多 Agent | 不原生支持 | 支持 Subgraph 嵌套 |
+| 可中断性 | 不支持 | 原生支持 interrupt / breakpoint |
+| 流式 | callbacks | 原生 astream / astream_events |
+| 持久化 | 手动 | Checkpointer 自动持久化 |
+
+### 6.2 核心概念详解
+
+#### 1. State（状态）
+
+```python
+from typing import TypedDict, Annotated
+from langgraph.graph import StateGraph, add_messages
+
+# 状态定义
+class AgentState(TypedDict):
+    messages: Annotated[list, add_messages]  # Reducer: append 模式
+    next_step: str                           # 无 reducer: 直接覆盖
+```
+
+- **Reducer**：LangGraph 用 `Annotated[type, reducer]` 声明状态字段的更新策略
+- `add_messages`：内置 reducer，将新消息 append 到旧消息列表（自动去重）
+- 自定义 reducer：可以写自己的函数控制合并逻辑（如只保留最后 N 条）
+
+#### 2. Node（节点）
+
+```python
+def call_model(state: AgentState) -> dict:
+    """每个 node 是一个函数: (state) -> dict, dict 中的 key 会更新到 state 对应字段"""
+    messages = state["messages"]
+    response = llm.invoke(messages)
+    return {"messages": [response]}  # 经 add_messages reducer 处理
+
+# 注册节点
+builder.add_node("model", call_model)
+builder.add_node("tools", tool_executor)
+```
+
+- 节点函数必须返回 `dict` 或 `Command`，返回值经 reducer 合并到 state
+- Async 节点：支持 `async def` 节点，`astream` / `ainvoke` 时自动 await
+
+#### 3. Edge（边）
+
+```python
+# 普通边：无条件跳转
+builder.add_edge("tools", "model")
+
+# 条件边：根据 state 动态决定下一节点
+def should_continue(state: AgentState) -> str:
+    if state["messages"][-1].tool_calls:
+        return "tools"     # 返回节点名
+    return "__end__"       # 内置终点
+
+builder.add_conditional_edges("model", should_continue, {
+    "tools": "tools",
+    "__end__": "__end__",
+})
+```
+
+- 条件边是 LangGraph 实现"LLM 驱动循环"的核心——LLM 输出 tool_calls 则继续，否则结束
+- 路由函数可以返回节点名（str）或节点名列表，框架自动 routing
+
+#### 4. Compile（编译）
+
+```python
+graph = builder.compile(checkpointer=InMemorySaver())
+# 返回 CompiledGraph，实际调用接口
+```
+
+- `compile()` 将 StateGraph 转换为 `CompiledGraph`
+- 编译时做图验证：检查是否连通、是否所有边都注册、是否有孤立节点
+- 编译后不可修改结构
+
+### 6.3 Pregel Runtime：LangGraph 的执行引擎
+
+LangGraph 底层基于 **Pregel 算法**（Google 的图计算模型演变而来），核心是"以节点为单位的步进式执行"。
+
+```
+每一步 (step):
+  1. 找出所有"就绪"的节点（入边都已执行完毕）
+  2. 并行执行就绪节点（默认顺序执行，可配置）
+  3. 收集输出，经 reducer 更新 state
+  4. 检查 checkpoint 条件
+  5. 进入下一步
+```
+
+- **多入边节点**：LangGraph 1.x 所有入边都到达后才执行（屏障）
+- **自循环**：model → tools → model 是标准循环，每轮都是新 step
+- **执行终点**：所有路径都抵达 `__end__` 或达到 `recursion_limit`
+
+### 6.4 Checkpoint 与持久化
+
+```python
+# 支持的 Checkpointer
+from langgraph.checkpoint.memory import InMemorySaver    # 内存
+from langgraph.checkpoint.sqlite import SqliteSaver      # SQLite 文件
+from langgraph.checkpoint.postgres import PostgresSaver  # PostgreSQL
+
+graph = builder.compile(checkpointer=SqliteSaver.from_conn_string("checkpoints.db"))
+```
+
+**Checkpoint 工作机制**：
+
+```
+每步执行后:
+  → 序列化当前 state (pickle / json)
+  → 写入 checkpointer (thread_id + step_id 为 key)
+  → 下次同一个 thread_id 的 invoke 自动恢复 state
+
+恢复流程:
+  → checkpointer.get(thread_id) → 读取最新 checkpoint
+  → 将 state 恢复到内存 → 从该点继续执行
+```
+
+- **序列化方式**：默认 pickle，可自定义 serializer
+- **频率**：默认每步后 checkpoint，可通过 `checkpoint_every` 控制
+- **数据隔离**：不同 `thread_id` 的 checkpoint 互不干扰
+
+### 6.5 Stream 模式详解
+
+LangGraph 支持多种流式输出，面试高频：
+
+```python
+# 1. stream (values) — 返回每个 step 后的完整 state
+for step in graph.stream(input, config):
+    print(step)  # {"model": {"messages": [...]}, "next_step": "..."}
+
+# 2. astream_events — 最细粒度，输出每个 node 内部的事件
+async for event in graph.astream_events(input, config, version="v2"):
+    if event["event"] == "on_chat_model_stream":
+        print(event["data"]["chunk"])  # LLM 逐 token 输出
+
+# 3. astream (updates) — 只返回每个 node 对 state 的增量更新
+for chunk in agent.astream(input, config):
+    # {"model": {"messages": [AIMessage(...)]}}  # 只包含变了的部分
+```
+
+| 模式 | 输出内容 | 适用场景 |
+|------|---------|---------|
+| `stream(values)` | 每步完整 state | 调试、日志 |
+| `stream(updates)` | 每步增量（默认） | 前端展示 node 级别进度 |
+| `astream_events` | 所有运行时事件 | 流式打字机效果、细粒度监控 |
+
+### 6.6 Interrupt 机制
+
+```python
+# 在 node 中挂起图执行
+from langgraph.types import interrupt
+
+def human_review(state):
+    result = interrupt({"question": "请审核以下内容:", "data": state["messages"]})
+    # 用户回复后继续执行
+    return {"messages": [AIMessage(content=f"审核结果: {result}")]}
+
+# 恢复执行
+graph.invoke(Command(resume="批准"), config)
+```
+
+**核心原理**：
+1. `interrupt()` 抛出特殊异常 → Pregel runtime 捕获 → 挂起图
+2. checkpoint 保存当前完整 state（包括挂起点位置）
+3. 应用层将控制权交给外部（前端展示审核界面）
+4. 外部通过 `Command(resume=data)` 恢复 → 从挂起点继续
+
+**与 Breakpoint 的区别**：
+
+| 机制 | 挂起时机 | 恢复方式 |
+|------|---------|---------|
+| `interrupt()` | 代码中显式调用 | `Command(resume=...)` |
+| `breakpoint` | 每步开始时自动暂停 | 逐 step 手动恢复 |
+| `NodeInterrupt` | 节点执行前框架检查 | 重试/跳过 |
+
+### 6.7 Subgraph（子图）
+
+```python
+# 子图定义（完全独立的 StateGraph）
+sub_builder = StateGraph(SubState)
+sub_builder.add_node("sub_model", sub_call_model)
+sub_builder.add_edge("sub_model", "__end__")
+sub_graph = sub_builder.compile()
+
+# 在主图中注册子图节点
+builder.add_node("research_papers", sub_graph)
+builder.add_edge("model", "research_papers")
+builder.add_edge("research_papers", "model")
+```
+
+- 子图和主图共享同一 runtime，但 state 是隔离的
+- 子图可以有自己的 checkpointer（嵌套 checkpoint）
+- DeepAgents 的 subagent 底层就是动态创建 subgraph + interrupt
+
+### 6.8 Command API（2.x 新增）
+
+```python
+# Command 替代返回 dict，支持动态路由
+def my_node(state):
+    if should_jump(state):
+        return Command(goto="other_node", update={"messages": [msg]})
+    return {"messages": [msg]}
+```
+
+- `Command(goto=node, update=state_dict)`：同时指定下一节点和状态更新
+- 替代了 `add_conditional_edges` + `return dict` 的两步写法
+- 让节点可以动态决定下一步去哪
+
+### 6.9 Recurision Limit 与安全
+
+```python
+config = {"configurable": {"thread_id": "1"}, "recursion_limit": 25}
+# 默认 recursion_limit = 25，超过则抛出 GraphRecursionError
+```
+
+- 防止 LLM 无限循环调用工具（如一直输出 tool_calls）
+- 达到限制时抛出 `GraphRecursionError`，可 catch 后提示用户
+- DeepAgents 的 SubAgentLimits 是在此之上的额外嵌套深度控制
+
+### 6.10 LangGraph 2.x vs 1.x 关键变化
+
+| 特性 | 1.x | 2.x |
+|------|-----|-----|
+| 状态定义 | `TypedDict` | `TypedDict` + `State` 基类 |
+| 路由 | `add_conditional_edges` | `Command(goto=...)` |
+| 边 | 字符串匹配 | 字符串 + 函数引用 |
+| 流式 | `astream` + callbacks | `astream_events` 统一 |
+| 稳定性 | ✅ 稳定 | ⚡ 快速迭代中 |
+
+### 面试高频八股清单
+
+| 问题 | 一句话答案 |
+|------|-----------|
+| LangGraph 和 LangChain AgentExecutor 的区别？ | AgentExecutor 是固定循环（LLM→工具→LLM），LangGraph 是任意拓扑有向图，支持分支、并行、子图嵌套、中断恢复 |
+| Reducer 是什么？有什么用？ | 声明状态字段的更新策略。`add_messages` 追加消息，自定义 reducer 可做截断、摘要、合并等 |
+| `__end__` 节点是自动存在的吗？ | 是，LangGraph 内置的终点节点，所有路径必须能到达它 |
+| Checkpoint 存的是什么？ | 完整 state + 当前执行位置（挂起点），以 thread_id + step_id 为 key |
+| InMemorySaver 重启没了怎么办？ | 换 SqliteSaver（文件持久化）或 PostgresSaver（数据库持久化），接口完全相同 |
+| LangGraph 支持并行执行吗？ | 支持 Fan-out，多条边从同一节点出发时并行执行下游节点 |
+| Subgraph 的 state 和主图是共享的吗？ | 独立的，子图有自己独立的 state。通过输入/输出映射桥接 |
+| interrupt 和 sleep 有什么区别？ | `interrupt` 持久化状态后挂起，进程重启后仍可恢复；`sleep` 只是协程暂停，重启后丢失 |
+| Stream 的 values 和 updates 模式性能差多少？ | values 每次返回完整 state（通常 ~KB 级），updates 只返回增量。AI 应用层可以忽略性能差异，选择方便前端的即可 |
+| LangGraph 能跑 1000 步的任务吗？ | 可以，但每一步都做 checkpoint，时间长后 state 累积变大。需要配合 context window 管理（如消息摘要） |

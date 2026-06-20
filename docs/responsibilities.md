@@ -1,11 +1,13 @@
-Python，LangGraph，Qwen2.5-Coder，FastAPI，MySQL，Qdrant，Elasticsearch，React
+多源论文研读与综述生成智能体 — 独立开发  2025-11 ~ 2026-05
 
-面向企业内部知识检索与数据分析场景，基于 FastAPI 构建 RESTful API 层，设计 POST /api/query 统一问答入口接收自然语言请求，通过 LangGraph 双 Agent 路由分发至 RAG 问答链路或 NL2SQL 链路，支持流式 SSE 返回，P50 延迟 1.9s
+技术栈：Python、DeepAgents、LangGraph、LangChain、LlamaIndex、rank-bm25、sentence-transformers、OpenAI兼容接口（Qwen）、FastAPI、WebSocket、asyncio、Pydantic、MySQL、SearXNG、pypdf、python-docx、pandas、ReportLab、Docker、Docker Compose
 
-RAG 链路调用 Qdrant API（/collections/{name}/points/search）执行向量检索，同时调用 Elasticsearch _search API 执行 BM25 全文检索，在应用层实现 RRF 融合排序；设计父子索引结构，子块命中后通过 parent_id 字段回溯父块，调用 Qdrant points API 按 ID 查询父块原文组装 LLM 上下文
+项目背景：面向科研文献调研场景，构建多智能体论文助手，支持主题输入、论文上传、资料检索、证据聚合与 Markdown/PDF 综述导出
 
-NL2SQL 链路基于 LangGraph 多阶段编排：先调用 MySQL INFORMATION_SCHEMA 接口检索相关表和字段元数据，再调用 Qwen2.5-Coder API（chat/completions）生成 SQL，然后执行 EXPLAIN 校验语法和成本，最后通过 mysql-connector-python execute() 执行只读查询并返回结果集；执行报错时自动提取错误信息拼接至 prompt 重新调用 LLM 修正，形成生成-校验-修正-执行闭环
+基于 DeepAgents 与 LangGraph 构建"一主三从"架构，主 Agent 通过 LangGraph StateGraph 运行时负责任务规划与多步推理，子 Agent 以字典式注册挂载为主图节点，经 interrupt 机制路由分别处理论文库检索、SearXNG 网络搜索和 MySQL 元数据查询，上下文通过 InMemorySaver checkpoint 按 thread_id 隔离
 
-通过 FastAPI middleware 统一拦截请求并检测 Prompt Injection 模式，命中时直接拒绝并写入日志；每次 NL2SQL 查询记录 user_query、生成的 SQL、执行结果和溯源来源到 MySQL audit_log 表，支持后续审计和调试
+基于 LlamaIndex 构建论文本地索引，检索采用向量召回（可切换 Mock / OpenAI / HuggingFace Embedding）取 top_k × 2 候选，经 rank-bm25 在同一候选集上计算 BM25 分数后做 RRF 融合（k=30），最终由 sentence-transformers all-MiniLM-L6-v2 计算余弦相似度做语义重排序，返回带来源文件、页码和相关性分数的证据片段，支持父子文档回溯组装上下文
 
-构建 200 条测试用例集，覆盖常规问答、多轮对话、注入攻击和跨文档推理等场景，通过 pytest + httpx TestClient 自动化调用全部 API 断言响应状态和字段完整性，常规问答覆盖率达到 96%
+基于 FastAPI + WebSocket 实现异步任务编排：POST /api/task 经 asyncio.create_task 启动后台 Agent 执行，Pydantic 校验请求体，thread_id 标识会话；monitor 模块将 tool_start / assistant_call / task_result 封装为标准事件格式推送至前端，跨线程场景通过 asyncio.run_coroutine_threadsafe 保证线程安全；ContextVar 隔离 session_dir 和 thread_id，工具在深层调用栈中通过 get_session_context() 获取当前会话目录无需逐层传参
+
+基于 Docker Compose 编排 4 容器（MySQL + Backend + Frontend + SearXNG），持久化卷管理模型缓存、索引和会话产物；SQL 工具层校验只读白名单（SELECT / SHOW / WITH / DESCRIBE / EXPLAIN），文件接口通过 resolve() + is_relative_to() 防路径穿越；多格式文件读取支持 pypdf / python-docx / pandas，报告生成通过 ReportLab 以 A4 版式、STSong-Light 中文字体渲染 Markdown 为 PDF

@@ -7,6 +7,7 @@ execute_sql_query 用于在确认结构后执行自定义查询。
 """
 
 import os
+import re
 
 from dotenv import load_dotenv
 from langchain_core.tools import tool
@@ -15,6 +16,25 @@ from mysql.connector import Error, connect
 from app.api.monitor import monitor
 
 load_dotenv()
+
+MAX_RESULT_ROWS = int(os.getenv("MYSQL_MAX_RESULT_ROWS", "100"))
+MAX_EXECUTION_TIME_MS = int(os.getenv("MYSQL_MAX_EXECUTION_TIME_MS", "5000"))
+READ_ONLY_PREFIXES = ("SELECT", "SHOW", "DESCRIBE", "EXPLAIN")
+FORBIDDEN_SQL_WORDS = {
+    "INSERT",
+    "UPDATE",
+    "DELETE",
+    "DROP",
+    "ALTER",
+    "CREATE",
+    "TRUNCATE",
+    "REPLACE",
+    "GRANT",
+    "REVOKE",
+    "CALL",
+    "LOAD",
+    "SET",
+}
 
 
 # 集中读取数据库配置，后续三个工具都复用这份连接参数
@@ -49,6 +69,43 @@ def get_db_config():
     return config
 
 
+def _strip_sql_comments(query: str) -> str:
+    query = re.sub(r"/\*.*?\*/", " ", query, flags=re.S)
+    query = re.sub(r"--[^\n\r]*", " ", query)
+    query = re.sub(r"#[^\n\r]*", " ", query)
+    return query.strip()
+
+
+def _validate_readonly_sql(query: str) -> tuple[bool, str]:
+    cleaned = _strip_sql_comments(query)
+    if not cleaned:
+        return False, "SQL 不能为空"
+    if ";" in cleaned:
+        return False, "拒绝执行：不允许多语句 SQL"
+
+    sql_upper = cleaned.upper()
+    if not sql_upper.startswith(READ_ONLY_PREFIXES):
+        return False, "拒绝执行：只允许 SELECT/SHOW/DESCRIBE/EXPLAIN 查询"
+
+    tokens = set(re.findall(r"\b[A-Z_]+\b", sql_upper))
+    forbidden = sorted(tokens & FORBIDDEN_SQL_WORDS)
+    if forbidden:
+        return False, f"拒绝执行：SQL 中包含非只读关键字 {', '.join(forbidden)}"
+
+    return True, cleaned
+
+
+def _quote_identifier(identifier: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_\u4e00-\u9fff]+", str(identifier)):
+        raise ValueError("表名只能包含字母、数字、下划线或中文")
+    return f"`{str(identifier).replace('`', '``')}`"
+
+
+def _fetch_table_names(cursor) -> set[str]:
+    cursor.execute("SHOW TABLES")
+    return {row[0] for row in cursor.fetchall()}
+
+
 @tool
 def list_sql_tables() -> str:
     """
@@ -77,17 +134,14 @@ def list_sql_tables() -> str:
         # 使用 with 管理连接和游标，查询结束后自动释放数据库资源
         with connect(**config) as conn:
             with conn.cursor() as cursor:
-                sql = "SHOW TABLES"
-                cursor.execute(sql)
+                tables = sorted(_fetch_table_names(cursor))
 
                 # SHOW TABLES 返回形如：[("drugs",), ("inventory",), ("sales_records",)]
-                tables = cursor.fetchall()
                 if not tables:
                     return "没有可用的表"
 
                 # 取每个元组的第一个元素，拼成模型容易阅读的表名列表
-                table_names = [table[0] for table in tables]
-                return f"可用的表有：{', '.join(table_names)}"
+                return f"可用的表有：{', '.join(tables)}"
     except Error as e:
         return f"查询出现异常：{str(e)}"
 
@@ -126,8 +180,12 @@ def get_table_data(table_name) -> str:
     try:
         with connect(**config) as conn:
             with conn.cursor() as cursor:
-                # 教程代码直接拼接表名，重点演示 Agent 查询链路；生产环境应改为白名单校验
-                sql = f"SELECT * FROM {table_name} LIMIT 100"
+                table_names = _fetch_table_names(cursor)
+                if table_name not in table_names:
+                    return f"拒绝查询：表 {table_name} 不在可用表白名单中。"
+
+                safe_table_name = _quote_identifier(table_name)
+                sql = f"SELECT * FROM {safe_table_name} LIMIT {MAX_RESULT_ROWS}"
                 cursor.execute(sql)
 
                 # cursor.description 保存查询结果的列元信息
@@ -173,13 +231,10 @@ def execute_sql_query(query) -> str:
     :param query: 要执行的自定义 SQL 语句
     :return: CSV 格式数据
     """
-    # 安全校验：只放行只读查询
-    sql_upper = query.strip().upper()
-    if not any(sql_upper.startswith(kw) for kw in
-               ("SELECT", "SHOW", "WITH", "DESCRIBE", "EXPLAIN")):
+    valid, cleaned_query = _validate_readonly_sql(query)
+    if not valid:
         return (
-            "拒绝执行：只允许只读查询（SELECT/SHOW/WITH/DESCRIBE/EXPLAIN）。"
-            f" 如需写入操作，请通过应用层接口完成。SQL 为: {query}"
+            f"{cleaned_query}。如需写入操作，请通过应用层接口完成。SQL 为: {query}"
         )
 
     # 埋点：记录模型最终生成的 SQL，便于教学时观察是否真的落到了正确表字段上
@@ -195,8 +250,12 @@ def execute_sql_query(query) -> str:
     try:
         with connect(**config) as conn:
             with conn.cursor() as cursor:
+                try:
+                    cursor.execute(f"SET SESSION MAX_EXECUTION_TIME={MAX_EXECUTION_TIME_MS}")
+                except Error:
+                    pass
                 # 工具层已做只读白名单校验，此处保留注释便于跟踪执行链路
-                cursor.execute(query)
+                cursor.execute(cleaned_query)
 
                 # 非查询类 SQL 没有结果集描述，这里统一返回提示，避免工具调用直接抛错给模型
                 description = cursor.description
@@ -206,7 +265,10 @@ def execute_sql_query(query) -> str:
                 columns = [desc[0] for desc in description]
 
                 # rows => [(值1, 值2), (值1, 值2)]
-                rows = cursor.fetchall()
+                rows = cursor.fetchmany(MAX_RESULT_ROWS + 1)
+                truncated = len(rows) > MAX_RESULT_ROWS
+                if truncated:
+                    rows = rows[:MAX_RESULT_ROWS]
 
                 # 每行元组统一转为逗号分隔文本，便于模型读取和后续整理
                 results = [",".join(map(str, row)) for row in rows]
@@ -214,7 +276,12 @@ def execute_sql_query(query) -> str:
                 # 第一行是列名，后续是查询数据
                 header_str = ",".join(columns)
                 data_str = "\n".join(results)
-                return f"{header_str}\n{data_str}"
+                suffix = (
+                    f"\n[提示] 结果已截断，仅返回前 {MAX_RESULT_ROWS} 行。"
+                    if truncated
+                    else ""
+                )
+                return f"{header_str}\n{data_str}{suffix}"
     except Error as e:
         return f"查询出现异常：{str(e)}"
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { cancelTask, listSessionFiles, startTask, uploadSessionFiles } from "../lib/api";
+import { cancelTask, listSessionFiles, listTaskEvents, startTask, uploadSessionFiles } from "../lib/api";
 import { WS_BASE_URL } from "../lib/config";
 import { createThreadId, getStoredThreadId, storeThreadId } from "../lib/thread";
 import type {
@@ -73,6 +73,11 @@ export function useDeepAgentSession() {
     setFiles(response.files || []);
   }, [sessionPath]);
 
+  const refreshEvents = useCallback(async () => {
+    const response = await listTaskEvents(threadId);
+    setEvents((response.events || []).slice(-MAX_EVENTS));
+  }, [threadId]);
+
   useEffect(() => {
     let disposed = false;
 
@@ -91,6 +96,9 @@ export function useDeepAgentSession() {
         }
         setConnectionState("connected");
         setLastError("");
+        refreshEvents().catch(() => {
+          // 历史事件恢复失败不影响 WebSocket 实时流。
+        });
         heartbeatTimerRef.current = window.setInterval(() => {
           if (socket.readyState === WebSocket.OPEN) {
             socket.send("ping");
@@ -172,7 +180,7 @@ export function useDeepAgentSession() {
       clearSocketTimers();
       socketRef.current?.close();
     };
-  }, [clearSocketTimers, threadId]);
+  }, [clearSocketTimers, refreshEvents, threadId]);
 
   useEffect(() => {
     if (!sessionPath) {
@@ -317,6 +325,7 @@ export function useDeepAgentSession() {
     lastError,
     lastPongAt,
     refreshFiles,
+    refreshEvents,
     resetSession,
     result,
     sessionPath,

@@ -251,6 +251,232 @@ textarea {
   background: rgba(255, 92, 122, 0.1);
 }
 
+.retrieval-meta {
+  margin-top: 8px;
+  color: var(--muted);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+}
+
+.retrieval-result {
+  max-height: 220px;
+  overflow: auto;
+  margin: 8px 0 0;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background: rgba(3, 8, 14, 0.82);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 10px;
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.evidence-list {
+  display: grid;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+  margin-top: 8px;
+}
+
+.evidence-list--compact {
+  max-height: 260px;
+}
+
+.evidence-card {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background: rgba(3, 8, 14, 0.72);
+  padding: 10px;
+}
+
+.evidence-card-header {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.evidence-card-header strong {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.evidence-card-header span {
+  color: var(--verdigris);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+}
+
+.evidence-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.archive-empty {
+  display: grid;
+  place-items: center;
+  min-height: 72px;
+  color: var(--muted);
+}
+
+.paper-card-list {
+  display: grid;
+  gap: 8px;
+  max-height: 340px;
+  overflow: auto;
+  margin-top: 8px;
+}
+
+.paper-card {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background: rgba(3, 8, 14, 0.72);
+  padding: 10px;
+}
+
+.paper-card-title {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.paper-card-title strong {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.paper-card-title span {
+  color: var(--verdigris);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.paper-card dl {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.paper-card dt {
+  color: var(--gold);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.paper-card dd {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.matrix-list {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+  margin-top: 8px;
+}
+
+.matrix-row-card {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background: rgba(3, 8, 14, 0.72);
+  padding: 10px;
+}
+
+.matrix-row-title {
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.matrix-row-title svg {
+  color: var(--gold);
+}
+
+.matrix-row-title strong {
+  min-width: 0;
+  color: var(--text);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matrix-row-title span {
+  color: var(--verdigris);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+}
+
+.matrix-row-grid {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 6px 8px;
+}
+
+.matrix-row-grid span {
+  color: var(--gold);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.matrix-row-grid p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.report-file-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background: rgba(3, 8, 14, 0.72);
+  padding: 10px;
+}
+
+.report-file-card div {
+  min-width: 0;
+}
+
+.report-file-card strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.report-file-card span {
+  display: block;
+  margin-top: 2px;
+  color: var(--verdigris);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+}
+
 .mission-textarea {
   border-color: var(--line) !important;
   background: rgba(3, 8, 14, 0.82) !important;

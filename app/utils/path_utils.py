@@ -5,7 +5,6 @@
 后续文件读取、Markdown 生成和 PDF 转换工具都可以复用这里的解析规则
 """
 
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -18,6 +17,9 @@ def resolve_path(filename: str, session_dir: Optional[str] = None) -> str:
     :param session_dir: 当前任务的会话目录
     :return: 解析后的绝对路径
     """
+    if not filename or not filename.strip():
+        raise ValueError("文件名不能为空")
+
     path = Path(filename)
     path_str = filename.replace("\\", "/")
 
@@ -29,45 +31,42 @@ def resolve_path(filename: str, session_dir: Optional[str] = None) -> str:
             path_str = str(path).replace("\\", "/")
             break
 
-    # updated/ 用于存放用户上传文件，应优先按项目根目录下的真实上传路径解析
-    if "updated/" in path_str:
-        idx = path_str.find("updated/")
-        relative_part = path_str[idx:]
-        return str(Path(relative_part).resolve())
-
     if not session_dir:
         return str(path.resolve())
 
     session_path = Path(session_dir).resolve()
     session_name = session_path.name
-    is_unix_abs = path_str.startswith("/")
 
-    if path.is_absolute() or (os.name == "nt" and is_unix_abs):
-        # Windows 下 "/xxx" 没有盘符，按会话目录内的相对路径处理
-        if os.name == "nt" and is_unix_abs and not path.drive:
-            full_path = session_path / path_str.lstrip("/")
-        else:
-            full_path = path.resolve()
-
-        try:
-            if session_path in full_path.parents or full_path == session_path:
-                return _fix_nested_session_path(full_path, session_path, session_name)
-        except Exception:
-            pass
-
-        # 真实绝对路径且不在 session_dir 中时保持原样，避免误改外部资源路径
-        return str(full_path)
+    # 真实绝对路径只有在已经位于 session_dir 内时才允许保留。
+    # 其他绝对路径统一降级为文件名，避免模型读取系统文件。
+    if path.is_absolute():
+        full_path = path.resolve()
+        if _is_relative_to(full_path, session_path):
+            return _fix_nested_session_path(full_path, session_path, session_name)
+        path = Path(path.name)
+        path_str = path.name
 
     parts = path.parts
 
     # 避免模型把 session 名或 output 前缀重复拼到当前会话目录里
     if session_name in parts:
-        return str(session_path / path.name)
+        path = Path(path.name)
 
-    if parts and parts[0] == "output":
-        return str(session_path / path.name)
+    if parts and parts[0] in {"output", "reports", "uploads", "updated"}:
+        path = Path(path.name)
 
-    return str(session_path / path)
+    full_path = (session_path / path).resolve()
+    if not _is_relative_to(full_path, session_path):
+        raise ValueError("拒绝访问：路径必须位于当前会话目录内")
+    return str(full_path)
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
 
 
 def _fix_nested_session_path(

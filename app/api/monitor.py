@@ -57,6 +57,7 @@ class ToolMonitor:
             "data": data or {},
             "timestamp": datetime.datetime.now().isoformat(),
         }
+        thread_id = None
 
         if self.websocket_manager:
             try:
@@ -67,6 +68,15 @@ class ToolMonitor:
                     self._send_to_websocket(payload, thread_id, manager_loop)
             except Exception as e:
                 print(f"[Monitor] WebSocket send failed: {e}")
+
+        try:
+            from app.models.session import save_run_event
+
+            if thread_id is None:
+                thread_id = get_thread_context()
+            save_run_event(thread_id, event_type, message, data or {})
+        except Exception:
+            pass
 
         # DeepAgents 脚本调试时，如果运行时暴露了 stream_writer，也同步写入流式输出
         if hasattr(builtins, "runtime") and hasattr(builtins.runtime, "stream_writer"):
