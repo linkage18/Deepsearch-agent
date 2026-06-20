@@ -107,7 +107,7 @@ query
 生成报告 → 提取 【证据: xxx】/【来源: 标题, p.5】 标记
          → 查 evidence_records 表
          → MiniLM 计算 claim 与 quote 的语义相似度
-         → ≥ 0.7 verified / 0.4-0.7 low_confidence / < 0.4 unfounded
+         → ≥ 0.5 verified / 0.25-0.5 low_confidence / < 0.25 unfounded
          → 写入 SQLite，返回量化指标 (覆盖率、unfounded 率)
 ```
 
@@ -169,7 +169,17 @@ docker compose -f docker/docker-compose.yaml up -d
 ### 5. 启动后端
 
 ```bash
-uv run uvicorn app.api.server:app --host 0.0.0.0 --port 8000 --reload
+# 确保没有旧进程占着 8000 端口，有则先 taskkill /F /IM python.exe
+uv run uvicorn app.api.server:app --host 0.0.0.0 --port 8000
+```
+
+> 注意：不要加 `--reload`，热重载在某些环境下会导致旧进程残留阻塞端口。如果遇到 404，先 `taskkill /F /IM python.exe` 再重试。
+
+启动成功后新开终端验证：
+
+```bash
+curl http://localhost:8000/health/live
+# → {"status":"ok"}
 ```
 
 ### 6. 启动前端
