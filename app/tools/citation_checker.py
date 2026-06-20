@@ -97,8 +97,8 @@ def verify_citations(
       1. Extract claims with citation markers
       2. Look up evidence_records for this thread/recent
       3. For each claim, match evidence by evidence_id or source
-      4. Compute semantic similarity between claim context and evidence quote
-      5. Classify: verified / low_confidence / unfounded / no_claim
+      4. Compute semantic similarity between claim context and evidence quote (MiniLM)
+      5. Classify: verified (≥0.5) / low_confidence (≥0.25) / unfounded (<0.25)
       6. Write to citation_checks table
 
     Returns verification stats.
@@ -160,9 +160,9 @@ def verify_citations(
                     matched_quote[:300],
                 )
                 if similarity is not None:
-                    if similarity >= 0.7:
+                    if similarity >= 0.5:
                         status = "verified"
-                    elif similarity >= 0.4:
+                    elif similarity >= 0.25:
                         status = "low_confidence"
                     else:
                         status = "unfounded"
@@ -190,9 +190,9 @@ def verify_citations(
                             matched_quote[:300],
                         )
                         if similarity is not None:
-                            if similarity >= 0.7:
+                            if similarity >= 0.5:
                                 status = "verified"
-                            elif similarity >= 0.4:
+                            elif similarity >= 0.25:
                                 status = "low_confidence"
                             else:
                                 status = "unfounded"
