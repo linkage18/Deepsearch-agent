@@ -25,22 +25,16 @@ from app.api.context import (
 )
 from app.api.monitor import monitor
 from app.config.paths import REPORT_DIR, UPLOAD_DIR, ensure_runtime_dirs
+from app.utils.logging import get_logger
 
-# 跨会话长期记忆
+logger = get_logger(__name__)
+
 from app.memory.memory_store import memory_store
-
-# 会话元数据管理
 from app.models.session import save_session, update_session
-
-# 文件类工具由主智能体直接掌握，负责读取上传附件和生成最终交付文档
 from app.tools.markdown_tools import generate_markdown
 from app.tools.pdf_tools import convert_md_to_pdf
 from app.tools.upload_file_read_tool import read_file_content
 
-# 主智能体是调度中心：
-# 1. tools 只放最终交付相关的文件工具
-# 2. subagents 放公开学术资料、论文元数据、LlamaIndex 论文知识库三类信息获取助手
-# 3. checkpointer 通过 thread_id 保存同一会话中的执行上下文
 main_agent = create_deep_agent(
     model=model,
     system_prompt=main_agent_content["system_prompt"],
@@ -54,64 +48,44 @@ project_root_path = REPORT_DIR.parent
 
 
 async def run_deep_agent(task_query, session_id):
-    """
-    异步流式执行主智能体
+    logger.info("开始执行会话", extra={"session_id": session_id, "query": task_query[:80]})
 
-    API 层会为每次任务传入用户问题和 session_id。本函数负责准备会话目录、
-    复制上传文件、写入 ContextVar，并在流式执行过程中把关键事件上报给前端。
-    :param task_query: 前端提交的原始任务问题
-    :param session_id: 当前任务 ID，同时用于 thread_id、输出目录和 WebSocket 定向推送
-    """
-    print(f"[MainAgent] 开始执行会话，session_id={session_id}")
-
-    # 保存会话元数据
     try:
         save_session(session_id, task_query)
     except Exception as exc:
-        print(f"[Session] 保存会话元数据异常（跳过）: {exc}")
+        logger.warning("保存会话元数据异常", extra={"session_id": session_id, "error": str(exc)})
 
-    # 每个会话独立使用 output/session_{session_id}，避免不同用户的产物互相覆盖
     session_dir = REPORT_DIR / f"session_{session_id}"
     session_dir.mkdir(parents=True, exist_ok=True)
 
-    # 前端和工具使用绝对路径；提示词里只给模型相对路径，降低模型误用系统绝对路径的概率
     session_dir_str = str(session_dir).replace("\\", "/")
     try:
         relative_session_dir_str = str(session_dir.relative_to(project_root_path)).replace(
             "\\", "/"
         )
     except ValueError:
-        relative_session_dir_str = str(session_dir).replace("\\", "/")
+        relative_session_dir_str = session_dir_str
 
-    # 上传文件先落在 updated/session_{session_id}，执行前复制到本次 output 工作目录
-    # 这样读文件工具和生成文件工具都只需要围绕同一个 session_dir 工作
     updated_dir_path = UPLOAD_DIR / f"session_{session_id}"
     updated_info_prompt = ""
     if updated_dir_path.exists():
         files = [f.name for f in updated_dir_path.iterdir() if f.is_file()]
         if files:
             for filename in files:
-                # copy2 会保留上传文件的修改时间、权限等元数据，便于后续排查文件来源
                 shutil.copy2(updated_dir_path / filename, session_dir / filename)
-
-            # 把上传文件列表注入用户消息，提醒模型先调用 read_file_content 获取附件内容
             updated_info_prompt = (
                 "\n    [已上传文件] 已加载到工作目录:\n"
                 + "\n".join([f"    - {f}" for f in files])
                 + "\n    请优先使用工具（read_file_content）读取并参考这些文件。"
             )
 
-    # ContextVar 让深层工具无需显式传参，也能拿到当前会话目录和 WebSocket thread_id
     session_dir_token = set_session_context(session_dir_str)
     session_id_token = set_thread_context(session_id)
 
-    # 前端拿到工作目录后，可以展示本次任务生成的 Markdown/PDF 等产物
     monitor.report_session_dir(session_dir_str)
 
-    # checkpointer 依赖 thread_id 区分会话记忆；同一 session_id 会复用同一条执行上下文
     config = {"configurable": {"thread_id": session_id}}
 
-    # 工作环境指令是运行时动态补充的，约束模型只在当前会话目录读写文件
     path_instruction = f"""
     【工作环境指令】
     工作目录: {relative_session_dir_str}
@@ -119,12 +93,11 @@ async def run_deep_agent(task_query, session_id):
 
     规则：
     1. 新生成文件必须保存到工作目录：'{relative_session_dir_str}/filename'
-    2. 读取已上传的文件时，请直接将文件名（例如：'开篇.txt'）作为 filename 参数传入（read_file_content）读取工具，不要带上任何目录前缀。
+    2. 读取已上传的文件时，请直接将文件名作为 filename 参数传入 read_file_content
     3. 使用相对路径，禁止使用绝对路径
     4. 若存在上传文件，请先分析内容
     """
 
-    # 跨会话记忆检索：用 query 关键词搜索历史记忆，匹配则注入
     memory_hint = ""
     try:
         search_keywords = re.split(r'[,，?\s]+', task_query.strip())
@@ -146,19 +119,17 @@ async def run_deep_agent(task_query, session_id):
                 + memory_hint
             )
     except Exception as exc:
-        print(f"[Memory] 记忆检索异常（跳过）: {exc}")
+        logger.warning("记忆检索异常", extra={"session_id": session_id, "error": str(exc)})
 
     path_instruction += memory_hint
 
     final_result = ""
 
     try:
-        # astream 会持续产出模型节点、工具节点和子智能体节点的状态片段
         async for chunk in main_agent.astream(
             {"messages": [{"role": "user", "content": task_query + path_instruction}]},
             config=config,
         ):
-            # chunk 形如 {"model": {"messages": [...]}}，这里主要关心模型最新消息
             for node_name, state in chunk.items():
                 if not state or "messages" not in state:
                     continue
@@ -167,10 +138,8 @@ async def run_deep_agent(task_query, session_id):
                     last_msg = messages[-1]
                     if node_name == "model":
                         if last_msg.tool_calls:
-                            # DeepAgents 调用子智能体时，本质上会产生名为 task 的工具调用
                             for tool_call in last_msg.tool_calls:
                                 if tool_call["name"] == "task":
-                                    # 子智能体调用单独上报，前端可以展示“正在调用哪个专家助手”
                                     monitor.report_assistant(
                                         tool_call["args"]["subagent_type"],
                                         {
@@ -180,27 +149,25 @@ async def run_deep_agent(task_query, session_id):
                                         },
                                     )
                         elif last_msg.content:
-                            # 模型没有继续调用工具时，最新文本内容就是本轮可反馈给前端的结果
-                            print(
-                                f"主智能体执行结果，最终结果：{last_msg.content[:100]}"
-                            )
+                            logger.info("主智能体产生结果", extra={
+                                "session_id": session_id,
+                                "preview": last_msg.content[:100],
+                            })
                             monitor.report_task_result(last_msg.content)
                             final_result = last_msg.content
 
     except asyncio.CancelledError:
+        logger.info("任务被取消", extra={"session_id": session_id})
         monitor.report_task_cancelled()
         raise
     except Exception as e:
-        # 异步执行异常也走 monitor，保证前端能收到明确错误事件
-        monitor._emit("error", f"执行主智能发生异常信息：{str(e)}")
+        logger.error("主智能体执行异常", extra={"session_id": session_id, "error": str(e)})
+        monitor._emit("error", f"执行主智能体发生异常: {str(e)}")
     finally:
-        # 任务结束后恢复 ContextVar，避免后续请求复用到本次会话目录或 thread_id
         reset_session_context(session_dir_token, session_id_token)
 
-    # 任务完成且有关键结果时，保存到长期记忆
     if final_result:
         try:
-            # key 自动取第一个 # 标题或前 30 字
             content_trimmed = " ".join(final_result.split())[:500]
             h1_match = re.search(r'^#\s+(.+)$', final_result, re.MULTILINE)
             if h1_match:
@@ -210,20 +177,18 @@ async def run_deep_agent(task_query, session_id):
             else:
                 memory_key = content_trimmed[:80]
             memory_store.save(memory_key, content_trimmed, session_id)
-            print(f"[Memory] 已保存记忆: {memory_key}")
+            logger.debug("已保存长期记忆", extra={"key": memory_key})
         except Exception as exc:
-            print(f"[Memory] 记忆保存异常（跳过）: {exc}")
+            logger.warning("记忆保存异常", extra={"session_id": session_id, "error": str(exc)})
 
-    # 保存对话记录到会话元数据
     if final_result:
         try:
             from app.models.session import append_turn
             append_turn(session_id, task_query, final_result[:2000])
-            print(f"[Session] 已保存对话记录")
+            logger.debug("已保存对话记录", extra={"session_id": session_id})
         except Exception as exc:
-            print(f"[Session] 对话记录保存异常（跳过）: {exc}")
+            logger.warning("对话记录保存异常", extra={"session_id": session_id, "error": str(exc)})
 
-    # 更新会话元数据（文件数和完成状态）
     try:
         session_dir_path = REPORT_DIR / f"session_{session_id}"
         file_count = 0
@@ -231,14 +196,13 @@ async def run_deep_agent(task_query, session_id):
             file_count = len([f for f in session_dir_path.iterdir()
                               if f.is_file() and f.suffix.lower() in (".md", ".pdf", ".txt")])
         update_session(session_id, completed=True, file_count=file_count)
-        print(f"[Session] 已更新会话元数据: files={file_count}")
+        logger.info("会话结束", extra={"session_id": session_id, "files": file_count})
     except Exception as exc:
-        print(f"[Session] 会话元数据更新异常（跳过）: {exc}")
+        logger.warning("会话元数据更新异常", extra={"session_id": session_id, "error": str(exc)})
 
 
 if __name__ == "__main__":
     import asyncio
-
     asyncio.run(
         run_deep_agent("从网络查询机器人信息，并生成Markdown文件", "test_session_001")
     )

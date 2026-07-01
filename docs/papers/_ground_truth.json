@@ -1,22 +1,229 @@
 [
-  {"query": "MIM-Reasoner uses what approach for budget allocation across multiplex network layers?", "doc_ids": ["Do 等 - 2024 - MIM-Reasoner Learning with Theoretical Guarantees for Multiplex Influence Maximization.pdf"], "expected_keywords": ["Knapsack", "budget allocation", "Multiple Choice Knapsack Problem"]},
-  {"query": "What theoretical guarantee does MIM-Reasoner provide for influence maximization?", "doc_ids": ["Do 等 - 2024 - MIM-Reasoner Learning with Theoretical Guarantees for Multiplex Influence Maximization.pdf"], "expected_keywords": ["theoretical guarantees", "regret bound", "reinforcement learning"]},
-  {"query": "How does cross-layer node representation work in deep RL for multilayer heterogeneous networks?", "doc_ids": ["Li 等 - 2026 - Deep reinforcement learning via structure-aware cross-layer node representation for influence maximi.pdf"], "expected_keywords": ["cross-layer", "structure-aware", "multilayer heterogeneous", "Deep Q-network"]},
-  {"query": "What is the difference between multiplex and multilayer heterogeneous networks?", "doc_ids": ["Li 等 - 2026 - Deep reinforcement learning via structure-aware cross-layer node representation for influence maximi.pdf", "Do 等 - 2024 - MIM-Reasoner Learning with Theoretical Guarantees for Multiplex Influence Maximization.pdf"], "expected_keywords": ["multiplex", "multilayer heterogeneous", "many-to-many", "inter-layer"]},
-  {"query": "Graph Bayesian Optimization for influence maximization uses what surrogate model?", "doc_ids": ["Yuan 等 - 2024 - Graph Bayesian Optimization for Multiplex Influence Maximization.pdf"], "expected_keywords": ["Bayesian linear regression", "surrogate model", "kernelized attention", "GBIM"]},
-  {"query": "How does information association affect multiplex influence diffusion in Multi-IM?", "doc_ids": ["Yuan 等 - 2024 - Graph Bayesian Optimization for Multiplex Influence Maximization.pdf", "gbim-method.md"], "expected_keywords": ["information association", "multiplex diffusion", "Multi-IM", "cascading"]},
-  {"query": "How does ReAct combine reasoning and acting in language models?", "doc_ids": ["react-pattern.md"], "expected_keywords": ["ReAct", "reasoning traces", "tool calls", "thought-action loop"]},
-  {"query": "What performance does ReAgent achieve on HotpotQA compared to chain-of-thought?", "doc_ids": ["react-pattern.md"], "expected_keywords": ["HotpotQA", "F1", "chain-of-thought", "ReAct"]},
-  {"query": "How does Reflexion use verbal reinforcement learning for agent improvement?", "doc_ids": ["reflexion-pattern.md"], "expected_keywords": ["Reflexion", "verbal reinforcement", "reflections", "episodic memory"]},
-  {"query": "What benchmark results does Reflexion achieve on AlfWorld?", "doc_ids": ["reflexion-pattern.md"], "expected_keywords": ["AlfWorld", "58%", "80%", "success rate"]},
-  {"query": "How does Toolformer enable self-supervised learning of tool use?", "doc_ids": ["toolformer-method.md"], "expected_keywords": ["Toolformer", "self-supervised", "API calls", "filtering", "fine-tuning"]},
-  {"query": "What are the limitations of Toolformer's approach to tool use?", "doc_ids": ["toolformer-method.md"], "expected_keywords": ["frozen", "no feedback loops", "atomic", "multi-step chains"]},
-  {"query": "What is chain-of-thought prompting and how does it improve reasoning?", "doc_ids": ["cot-prompting.md"], "expected_keywords": ["chain-of-thought", "step-by-step", "reasoning", "few-shot"]},
-  {"query": "What accuracy does chain-of-thought achieve on GSM8K math problems?", "doc_ids": ["cot-prompting.md"], "expected_keywords": ["GSM8K", "40.7%", "PaLM", "accuracy"]},
-  {"query": "How do generative agents maintain memory and plan actions?", "doc_ids": ["generative-agents.md"], "expected_keywords": ["memory stream", "reflection", "planning", "generative agents"]},
-  {"query": "What emergent behaviors do generative agents produce in simulated environments?", "doc_ids": ["generative-agents.md"], "expected_keywords": ["emergent", "social behaviors", "25 agents", "believability"]},
-  {"query": "How does RETRO use retrieval to improve language model efficiency?", "doc_ids": ["retro-method.md"], "expected_keywords": ["RETRO", "retrieval", "cross-attention", "nearest neighbors"]},
-  {"query": "What parameter efficiency does RETRO achieve compared to GPT-3?", "doc_ids": ["retro-method.md"], "expected_keywords": ["7.5B", "175B", "4x", "parameter-efficient"]},
-  {"query": "Compare the memory mechanisms in Reflexion vs Generative Agents", "doc_ids": ["reflexion-pattern.md", "generative-agents.md"], "expected_keywords": ["memory", "reflection", "episodic", "planning"]},
-  {"query": "How do ReAct and Toolformer differ in their approach to tool use?", "doc_ids": ["react-pattern.md", "toolformer-method.md"], "expected_keywords": ["ReAct", "Toolformer", "tool use", "reasoning", "self-supervised"]}
+  {
+    "query": "Graph convolution networks semi-supervised classification using spectral graph theory",
+    "doc_ids": [
+      "Kipf & Welling - 2017 - Graph Convolutional Networks for Semi-Supervised Classification.txt"
+    ]
+  },
+  {
+    "query": "BERT bidirectional pre-training masked language model fine-tuning",
+    "doc_ids": [
+      "Devlin et al. - 2019 - BERT- Pre-training of Deep Bidirectional Transformers.txt"
+    ]
+  },
+  {
+    "query": "Proximal policy optimization clipped surrogate objective trust region",
+    "doc_ids": [
+      "Schulman et al. - 2017 - Proximal Policy Optimization Algorithms.txt"
+    ]
+  },
+  {
+    "query": "ResNet residual learning skip connections degradation problem deep network",
+    "doc_ids": [
+      "He et al. - 2016 - Deep Residual Learning for Image Recognition.txt"
+    ]
+  },
+  {
+    "query": "DQN experience replay target network Atari deep reinforcement learning",
+    "doc_ids": [
+      "Mnih et al. - 2015 - Human-level Control through Deep Reinforcement Learning.txt"
+    ]
+  },
+  {
+    "query": "What is the best GNN architecture for node classification? Compare GCN, GAT, and GraphSAGE",
+    "doc_ids": [
+      "Kipf & Welling - 2017 - Graph Convolutional Networks for Semi-Supervised Classification.txt",
+      "Veličković et al. - 2018 - Graph Attention Networks.txt",
+      "Hamilton et al. - 2017 - Inductive Representation Learning on Large Graphs.txt"
+    ]
+  },
+  {
+    "query": "How do GPT-3 and InstructGPT differ in training approach? Compare few-shot vs RLHF",
+    "doc_ids": [
+      "Brown et al. - 2020 - Language Models are Few-Shot Learners (GPT-3).txt",
+      "Ouyang et al. - 2022 - Training Language Models to Follow Instructions with Human Feedback.txt"
+    ]
+  },
+  {
+    "query": "Which object detector is faster: YOLO or Faster R-CNN? Compare single-stage vs two-stage detection",
+    "doc_ids": [
+      "Redmon et al. - 2016 - You Only Look Once- Unified Real-Time Object Detection.txt",
+      "Ren et al. - 2015 - Faster R-CNN- Towards Real-Time Object Detection with Region Proposal Networks.txt"
+    ]
+  },
+  {
+    "query": "Compare RAG and FiD for open-domain question answering retrieval augmented generation",
+    "doc_ids": [
+      "Lewis et al. - 2020 - Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks.txt",
+      "Izacard & Grave - 2021 - FiD- Leveraging Passage Retrieval with Generative Models.txt"
+    ]
+  },
+  {
+    "query": "What attention mechanisms exist in modern deep learning? Compare Transformer self-attention, GAT, and ViT patch attention",
+    "doc_ids": [
+      "Vaswani et al. - 2017 - Attention Is All You Need.txt",
+      "Veličković et al. - 2018 - Graph Attention Networks.txt",
+      "Dosovitskiy et al. - 2021 - An Image is Worth 16x16 Words- Transformers for Image Recognition.txt"
+    ]
+  },
+  {
+    "query": "How do different methods handle scaling? Compare scaling laws, data-constrained training, and EfficientNet compound scaling",
+    "doc_ids": [
+      "Kaplan et al. - 2020 - Scaling Laws for Neural Language Models.txt",
+      "Muennighoff et al. - 2023 - Scaling Data-Constrained Language Models.txt",
+      "Tan & Le - 2019 - EfficientNet- Rethinking Model Scaling for CNNs.txt"
+    ]
+  },
+  {
+    "query": "Which meta-learning algorithms use gradient-based adaptation? Compare MAML, Reptile, and iMAML",
+    "doc_ids": [
+      "Finn et al. - 2017 - Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks.txt",
+      "Nichol & Schulman - 2018 - Reptile- A Scalable Meta-Learning Algorithm.txt",
+      "Rajeswaran et al. - 2019 - Meta-Learning with Implicit Gradients.txt"
+    ]
+  },
+  {
+    "query": "How do hyperparameter optimization methods compare? Discuss Bayesian optimization, random search, TPE, and HyperBand",
+    "doc_ids": [
+      "Bergstra & Bengio - 2012 - Random Search for Hyper-Parameter Optimization.txt",
+      "Snoek et al. - 2012 - Practical Bayesian Optimization of Machine Learning Algorithms.txt",
+      "Bergstra et al. - 2011 - Algorithms for Hyper-Parameter Optimization.txt",
+      "Li et al. - 2017 - Hyperband- A Novel Bandit-Based Approach to Hyperparameter Optimization.txt"
+    ]
+  },
+  {
+    "query": "Which transformer model achieves 88.55% on ImageNet top-1 accuracy with patch-based processing?",
+    "doc_ids": [
+      "Dosovitskiy et al. - 2021 - An Image is Worth 16x16 Words- Transformers for Image Recognition.txt"
+    ]
+  },
+  {
+    "query": "What accuracy does GIN achieve on MUTAG graph classification benchmark?",
+    "doc_ids": [
+      "Xu et al. - 2019 - How Powerful are Graph Neural Networks.txt"
+    ]
+  },
+  {
+    "query": "What EM score does REPLUG achieve on Natural Questions compared to GPT-3?",
+    "doc_ids": [
+      "Shi et al. - 2023 - REPLUG- Retrieval-Augmented Black-Box Language Models.txt"
+    ]
+  },
+  {
+    "query": "Which algorithm achieves 82.5% median human-normalized score on Atari by integrating six DQN extensions?",
+    "doc_ids": [
+      "Hessel et al. - 2018 - Rainbow- Combining Improvements in Deep Reinforcement Learning.txt"
+    ]
+  },
+  {
+    "query": "Compare the sample efficiency of SAC vs PPO on MuJoCo continuous control tasks",
+    "doc_ids": [
+      "Haarnoja et al. - 2018 - Soft Actor-Critic- Off-Policy Maximum Entropy Deep RL.txt",
+      "Schulman et al. - 2017 - Proximal Policy Optimization Algorithms.txt"
+    ]
+  },
+  {
+    "query": "What is the difference between RLHF and DPO for aligning language models with human preferences?",
+    "doc_ids": [
+      "Ouyang et al. - 2022 - Training Language Models to Follow Instructions with Human Feedback.txt",
+      "Rafailov et al. - 2023 - Direct Preference Optimization- Your Language Model is Secretly a Reward Model.txt"
+    ]
+  },
+  {
+    "query": "Compare LoRA and QLoRA for parameter-efficient fine-tuning of large language models",
+    "doc_ids": [
+      "Dettmers et al. - 2023 - QLoRA- Efficient Finetuning of Quantized Language Models.txt",
+      "Hu et al. - 2022 - LoRA- Low-Rank Adaptation of Large Language Models.txt"
+    ]
+  },
+  {
+    "query": "What is the difference between MAML and prototypical networks for few-shot learning?",
+    "doc_ids": [
+      "Finn et al. - 2017 - Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks.txt",
+      "Snell et al. - 2017 - Prototypical Networks for Few-Shot Learning.txt"
+    ]
+  },
+  {
+    "query": "Cluster-GCN vs GraphSAINT: compare graph sampling methods for training large GNNs",
+    "doc_ids": [
+      "Chiang et al. - 2019 - Cluster-GCN- An Efficient Algorithm for Training Deep and Large Graph Neural Networks.txt",
+      "Zeng et al. - 2020 - GraphSAINT- Graph Sampling Based Inductive Learning Method.txt"
+    ]
+  },
+  {
+    "query": "Self-supervised learning for tool use: compare Toolformer with other approaches",
+    "doc_ids": [
+      "toolformer-method.md"
+    ]
+  },
+  {
+    "query": "ReAct reasoning and acting: how does it combine chain-of-thought with tool calls?",
+    "doc_ids": [
+      "react-pattern.md"
+    ]
+  },
+  {
+    "query": "Chain-of-thought prompting improves reasoning in large language models through step-by-step thinking",
+    "doc_ids": [
+      "cot-prompting.md"
+    ]
+  },
+  {
+    "query": "Which vision model achieves 99.5% on CIFAR-100 by treating images as sequences of patches?",
+    "doc_ids": [
+      "Dosovitskiy et al. - 2021 - An Image is Worth 16x16 Words- Transformers for Image Recognition.txt"
+    ]
+  },
+  {
+    "query": "FlashAttention IO-aware exact attention tiling reducing HBM reads 2x speedup BERT training",
+    "doc_ids": [
+      "Dao et al. - 2022 - FlashAttention- Fast and Memory-Efficient Exact Attention.txt"
+    ]
+  },
+  {
+    "query": "Neural architecture search comparison: DARTS differentiable vs NAS-RL reinforcement learning approach",
+    "doc_ids": [
+      "Liu et al. - 2019 - Differentiable Architecture Search.txt",
+      "Zoph & Le - 2017 - Neural Architecture Search with Reinforcement Learning.txt"
+    ]
+  },
+  {
+    "query": "How does NeRF represent 3D scenes as neural radiance fields for novel view synthesis?",
+    "doc_ids": [
+      "Mildenhall et al. - 2020 - NeRF- Representing Scenes as Neural Radiance Fields.txt"
+    ]
+  },
+  {
+    "query": "What techniques improve LLM inference speed? Compare speculative decoding with other methods",
+    "doc_ids": [
+      "Leviathan et al. - 2023 - Speculative Decoding for Fast LLM Inference.txt"
+    ]
+  },
+  {
+    "query": "Evolutionary strategies as a scalable alternative to traditional reinforcement learning algorithms parallelization",
+    "doc_ids": [
+      "Salimans et al. - 2017 - Evolutionary Strategies as a Scalable Alternative to Reinforcement Learning.txt"
+    ]
+  },
+  {
+    "query": "Bidirectional transformers vs autoregressive models: compare BERT, GPT, RoBERTa, and XLNet pretraining",
+    "doc_ids": [
+      "Devlin et al. - 2019 - BERT- Pre-training of Deep Bidirectional Transformers.txt",
+      "Radford et al. - 2018 - Generative Pre-Training (GPT).txt",
+      "Liu et al. - 2019 - RoBERTa- A Robustly Optimized BERT Pretraining Approach.txt",
+      "Yang et al. - 2019 - XLNet- Generalized Autoregressive Pretraining for Language Understanding.txt"
+    ]
+  },
+  {
+    "query": "How do generative agents maintain memory streams and reflection for believable social simulation?",
+    "doc_ids": [
+      "generative-agents.md"
+    ]
+  },
+  {
+    "query": "RETRO retrieval augmented language model cross-attention nearest neighbor database efficiency compared to GPT-3",
+    "doc_ids": [
+      "retro-method.md"
+    ]
+  }
 ]

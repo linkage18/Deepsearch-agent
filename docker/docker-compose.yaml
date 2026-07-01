@@ -55,20 +55,25 @@ services:
     env_file:
       - ../.env
     environment:
-      # Docker 内 MySQL 主机名使用服务名，而非 localhost
       MYSQL_HOST: mysql
       MYSQL_PORT: "3306"
-      # SearXNG 搜索服务地址（Docker 内通过服务名访问）
-      SEARXNG_BASE_URL_DOCKER: http://searxng:8080
+      SEARXNG_BASE_URL: http://searxng:8080
       DATA_ROOT: /app/data
+      LOG_LEVEL: INFO
+      DISABLE_API_AUTH: "true"  # Docker 内网环境默认不开认证
     volumes:
-      # 上传文件、报告、论文库、索引和 SQLite 元数据统一持久化
       - deepsearch_data:/app/data
-      # 缓存 sentence-transformers 模型避免反复下载
       - deepsearch_model_cache:/root/.cache/huggingface
+      - ../app:/app/app
     depends_on:
       mysql:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
     networks:
       - deepsearch-net
 

@@ -74,7 +74,7 @@
 | 搜索引擎 | SearXNG（自托管 Docker） | 聚合 arXiv、Google Scholar、GitHub，零费用 |
 | 结构化数据 | MySQL 8.4 + mysql-connector-python | 只读白名单 + 多语句拦截 + 表名白名单 |
 | 知识库索引 | LlamaIndex + SentenceSplitter | 本地向量索引，chunk_size=512, overlap=64 |
-| 检索流水线 | 向量 → BM25 → RRF → MiniLM 重排序 | 4 层逐步精排，MRR 提升 45% |
+| 检索流水线 | 向量 → BM25 → RRF 融合 (+ 可选 MiniLM) | 混合 BM25+RRF MRR 0.97（纯向量 0.88 → 混合 0.97） |
 | 文件处理 | pypdf / python-docx / pandas / ReportLab | 多格式读取 + Markdown/PDF 生成 |
 | 异步服务 | FastAPI + Uvicorn + asyncio | 后台协程 + WebSocket 实时推送 |
 | 会话安全 | ContextVar + path_utils | 协程级隔离 + 路径穿越防护 |
@@ -95,11 +95,11 @@ query
 
 | Strategy | Recall@3 | Recall@5 | Recall@10 | MRR |
 |---|---|---|---|---|
-| 纯向量 | 0.1500 | 0.1500 | 0.1500 | 0.1500 |
-| 混合(BM25+向量) | 0.3750 | 0.3750 | 0.3750 | 0.3917 |
-| 全链路(+rerank) | 0.4000 | 0.4500 | 0.4500 | **0.4167** |
+| 纯向量 | 0.8775 | 0.9412 | 0.9902 | 0.8824 |
+| **混合(BM25+向量)** | **0.9534** | **0.9681** | **0.9902** | **0.9706** |
+| 全链路(+rerank) | 0.8309 | 0.9069 | 0.9902 | 0.8676 |
 
-> 评测集：20 条 query，覆盖 10 篇论文。运行 `uv run python -m app.evaluation.evaluate --format md`
+> 评测集：34 条 query（8 主题簇），90 篇论文。运行 `uv run python -m app.evaluation.evaluate --format md`
 
 ### 引用校验
 

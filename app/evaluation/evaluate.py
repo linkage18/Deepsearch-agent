@@ -2,7 +2,7 @@
 RAG 评测脚本
 
 对 _ground_truth.json 中的每条 query，分别运行三种检索策略：
-1. 纯向量（现有代码，跳过 BM25 和 rerank）
+1. 纯向量
 2. 混合（BM25 + 向量 RRF 融合）
 3. 全链路（混合 + MiniLM 重排序）
 
@@ -12,17 +12,101 @@ RAG 评测脚本
 """
 
 import json
-import sys
 import os
+import sys
+import time
+from typing import Any, Callable
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-
-# 抑制警告
 os.environ["PYTHONWARNINGS"] = "ignore"
 
 GT_PATH = os.path.join(
     os.path.dirname(__file__), "..", "..", "docs", "papers", "_ground_truth.json"
 )
+
+RETRIEVAL_CONFIG: dict[str, Any] = {}
+RECALL_KS = [3, 5, 10]
+
+
+def _load_config() -> dict[str, Any]:
+    """从 retrieval_config 获取当前参数，确保评测与线上链路一致。"""
+    from app.config.retrieval_config import RETRIEVAL_CONFIG as cfg
+    return dict(cfg)
+
+
+def _get_tokenize_fn():
+    """根据配置获取分词函数，避免重复代码。"""
+    bm25_tok = RETRIEVAL_CONFIG.get("bm25_tokenizer")
+    if bm25_tok == "jieba":
+        import jieba
+        return lambda x: list(jieba.cut(x))
+    return lambda x: x.lower().split()
+
+
+def _retrieve_and_hybrid(query: str, top_k: int) -> tuple[list[Any], list[str]]:
+    """执行向量检索 + BM25 RRF 融合，返回 (nodes, sources)。"""
+    from app.tools.llamaindex_tools import _load_or_build_index
+    from rank_bm25 import BM25Okapi
+
+    index = _load_or_build_index()
+    candidate_k = max(1, min(top_k * 3, 20))
+    retriever = index.as_retriever(similarity_top_k=candidate_k)
+    nodes = retriever.retrieve(query)
+
+    if not nodes:
+        return [], []
+
+    texts = []
+    for n in nodes:
+        node = getattr(n, "node", n)
+        t = getattr(node, "text", "") or node.get_content()
+        texts.append(t)
+
+    tokenize_fn = _get_tokenize_fn()
+    tokenized_corpus = [tokenize_fn(t) for t in texts]
+    bm25 = BM25Okapi(tokenized_corpus)
+    bm25_scores = bm25.get_scores(tokenize_fn(query))
+
+    # BM25 退化兜底
+    if max(bm25_scores) < 0.1:
+        sources = _nodes_to_sources(nodes)
+        return nodes[:top_k], sources[:top_k]
+
+    k = RETRIEVAL_CONFIG.get("rrf_k", 60)
+    bm25_rank_args = sorted(
+        range(len(bm25_scores)), key=lambda j: bm25_scores[j], reverse=True
+    )
+
+    fused = []
+    for i, n in enumerate(nodes):
+        vector_rank = i + 1
+        try:
+            bm25_rank = bm25_rank_args.index(i) + 1
+        except ValueError:
+            bm25_rank = len(nodes)
+        rrf_score = 1.0 / (k + vector_rank) + 1.0 / (k + bm25_rank)
+        fused.append((n, rrf_score))
+
+    fused.sort(key=lambda x: x[1], reverse=True)
+    fused_nodes = [fn[0] for fn in fused[:top_k]]
+    sources = _nodes_to_sources(fused_nodes)
+    return fused_nodes, sources
+
+
+def _nodes_to_sources(nodes: list[Any]) -> list[str]:
+    """从节点列表中提取来源文件名。"""
+    sources = []
+    for n in nodes:
+        node = getattr(n, "node", n)
+        meta = getattr(node, "metadata", {}) or {}
+        source = (
+            meta.get("file_name")
+            or meta.get("file_path")
+            or meta.get("document_title")
+            or "未知"
+        )
+        sources.append(source)
+    return sources
 
 
 def load_ground_truth() -> list[dict]:
@@ -31,91 +115,23 @@ def load_ground_truth() -> list[dict]:
 
 
 def run_vector_only(query: str, top_k: int) -> list[str]:
-    """纯向量检索（不注入 BM25/rerank，直接调用底层 retriever）"""
+    """纯向量检索。"""
     from app.tools.llamaindex_tools import _load_or_build_index
 
     try:
         index = _load_or_build_index()
         retriever = index.as_retriever(similarity_top_k=top_k)
         nodes = retriever.retrieve(query)
-        sources = []
-        for n in nodes:
-            node = getattr(n, "node", n)
-            meta = getattr(node, "metadata", {}) or {}
-            source = (
-                meta.get("file_name")
-                or meta.get("file_path")
-                or meta.get("document_title")
-                or "未知"
-            )
-            sources.append(source)
-        return sources
+        return _nodes_to_sources(nodes)
     except Exception as exc:
         print(f"  [Error] 纯向量检索失败: {exc}")
         return []
 
 
 def run_hybrid(query: str, top_k: int) -> list[str]:
-    """混合检索（向量 + BM25 RRF）"""
-    from app.tools.llamaindex_tools import _load_or_build_index
-    from rank_bm25 import BM25Okapi
-    from app.config.retrieval_config import RETRIEVAL_CONFIG
-
-    bm25_tok = RETRIEVAL_CONFIG.get("bm25_tokenizer")
-    if bm25_tok == "jieba":
-        import jieba
-        tok_fn = lambda x: list(jieba.cut(x))
-    else:
-        tok_fn = lambda x: x.lower().split()
-
+    """混合检索（向量 + BM25 RRF）。"""
     try:
-        index = _load_or_build_index()
-        candidate_k = max(1, min(top_k * 3, 20))
-        retriever = index.as_retriever(similarity_top_k=candidate_k)
-        nodes = retriever.retrieve(query)
-
-        if not nodes:
-            return []
-
-        texts = []
-        for n in nodes:
-            node = getattr(n, "node", n)
-            t = getattr(node, "text", "") or node.get_content()
-            texts.append(t)
-
-        tokenized_corpus = [tok_fn(t) for t in texts]
-        bm25 = BM25Okapi(tokenized_corpus)
-        tokenized_query = tok_fn(query)
-        bm25_scores = bm25.get_scores(tokenized_query)
-
-        k = 60
-        fused = []
-        for i, n in enumerate(nodes):
-            vector_rank = i + 1
-            bm25_rank_args = sorted(
-                range(len(bm25_scores)), key=lambda j: bm25_scores[j], reverse=True
-            )
-            try:
-                bm25_rank = bm25_rank_args.index(i) + 1
-            except ValueError:
-                bm25_rank = len(nodes)
-            rrf_score = 1.0 / (k + vector_rank) + 1.0 / (k + bm25_rank)
-            fused.append((n, rrf_score))
-
-        fused.sort(key=lambda x: x[1], reverse=True)
-        fused_nodes = [fn[0] for fn in fused[:top_k]]
-
-        sources = []
-        for n in fused_nodes:
-            node = getattr(n, "node", n)
-            meta = getattr(node, "metadata", {}) or {}
-            source = (
-                meta.get("file_name")
-                or meta.get("file_path")
-                or meta.get("document_title")
-                or "未知"
-            )
-            sources.append(source)
+        _, sources = _retrieve_and_hybrid(query, top_k)
         return sources
     except Exception as exc:
         print(f"  [Error] 混合检索失败: {exc}")
@@ -123,58 +139,14 @@ def run_hybrid(query: str, top_k: int) -> list[str]:
 
 
 def run_full_pipeline(query: str, top_k: int) -> list[str]:
-    """全链路（混合 + MiniLM 重排序）"""
-    from app.tools.llamaindex_tools import _load_or_build_index
-    from rank_bm25 import BM25Okapi
-    from app.config.retrieval_config import RETRIEVAL_CONFIG
+    """全链路（混合 + MiniLM 重排序）。"""
     from app.tools.rerank_tools import rerank_candidates
 
-    bm25_tok = RETRIEVAL_CONFIG.get("bm25_tokenizer")
-    if bm25_tok == "jieba":
-        import jieba
-        tok_fn = lambda x: list(jieba.cut(x))
-    else:
-        tok_fn = lambda x: x.lower().split()
-
     try:
-        index = _load_or_build_index()
-        candidate_k = max(1, min(top_k * 3, 20))
-        retriever = index.as_retriever(similarity_top_k=candidate_k)
-        nodes = retriever.retrieve(query)
-
-        if not nodes:
-            return []
-
-        texts = []
-        for n in nodes:
-            node = getattr(n, "node", n)
-            t = getattr(node, "text", "") or node.get_content()
-            texts.append(t)
-
-        tokenized_corpus = [tok_fn(t) for t in texts]
-        bm25 = BM25Okapi(tokenized_corpus)
-        tokenized_query = tok_fn(query)
-        bm25_scores = bm25.get_scores(tokenized_query)
-
-        k = 60
-        fused = []
-        for i, n in enumerate(nodes):
-            vector_rank = i + 1
-            bm25_rank_args = sorted(
-                range(len(bm25_scores)), key=lambda j: bm25_scores[j], reverse=True
-            )
-            try:
-                bm25_rank = bm25_rank_args.index(i) + 1
-            except ValueError:
-                bm25_rank = len(nodes)
-            rrf_score = 1.0 / (k + vector_rank) + 1.0 / (k + bm25_rank)
-            fused.append((n, rrf_score))
-
-        fused.sort(key=lambda x: x[1], reverse=True)
-        fused_nodes = [fn[0] for fn in fused[: max(1, min(top_k * 2, len(fused)))]]
+        nodes, _ = _retrieve_and_hybrid(query, top_k * 2)
 
         candidate_texts = []
-        for n in fused_nodes:
+        for n in nodes:
             node = getattr(n, "node", n)
             t = getattr(node, "text", "") or node.get_content()
             meta = getattr(node, "metadata", {}) or {}
@@ -188,9 +160,7 @@ def run_full_pipeline(query: str, top_k: int) -> list[str]:
             candidate_texts.append((t, source, score))
 
         reranked = rerank_candidates(query, candidate_texts, top_k=top_k)
-
-        sources = [s for _, s, _ in reranked]
-        return sources
+        return [s for _, s, _ in reranked]
     except Exception as exc:
         print(f"  [Error] 全链路检索失败: {exc}")
         return []
@@ -199,17 +169,15 @@ def run_full_pipeline(query: str, top_k: int) -> list[str]:
 def compute_metrics(
     results: list[list[str]], ground_truths: list[list[str]], ks: list[int]
 ) -> dict:
-    """计算 Recall@K 和 MRR"""
+    """计算 Recall@K 和 MRR。"""
     metrics = {}
     for k in ks:
         recalls = []
         reciprocal_ranks = []
         for pred_sources, gt_docs in zip(results, ground_truths):
             top_k = pred_sources[:k]
-            # Recall@K: 期望文档出现在 top_k 中的比例
             hits = sum(1 for gt in gt_docs if any(gt in s for s in top_k))
             recalls.append(hits / max(len(gt_docs), 1))
-            # MRR: 第一个相关文档的倒数排名
             for rank, source in enumerate(top_k, 1):
                 if any(gt in source for gt in gt_docs):
                     reciprocal_ranks.append(1.0 / rank)
@@ -225,7 +193,7 @@ def compute_metrics(
 
 
 def print_table(results: dict[str, dict], ks: list[int], fmt: str = "text"):
-    """打印对比表格，支持 text 和 markdown 两种格式。"""
+    """打印对比表格。"""
     if fmt == "markdown":
         header = "| " + "Strategy" + "".join(
             [f" | Recall@{str(k)}" for k in ks] + [" | MRR |"]
@@ -258,7 +226,9 @@ def print_table(results: dict[str, dict], ks: list[int], fmt: str = "text"):
 
 def main():
     import argparse
-    import time
+
+    global RETRIEVAL_CONFIG
+    RETRIEVAL_CONFIG = _load_config()
 
     parser = argparse.ArgumentParser(description="RAG 检索策略评测")
     parser.add_argument(
@@ -268,9 +238,14 @@ def main():
     args = parser.parse_args()
     output_fmt = "markdown" if args.format in ("md", "markdown") else "text"
 
+    ks = RECALL_KS
+
     if output_fmt == "text":
         print("=" * 60)
         print("RAG 检索策略评测")
+        print(f"配置: rrf_k={RETRIEVAL_CONFIG.get('rrf_k')}, "
+              f"rerank={RETRIEVAL_CONFIG.get('rerank_model')}, "
+              f"multiplier={RETRIEVAL_CONFIG.get('candidate_multiplier')}")
         print("=" * 60)
 
     ground_truth = load_ground_truth()
@@ -281,8 +256,7 @@ def main():
     for i, q in enumerate(queries):
         print(f"  [{i+1}] {q[:60]}... -> {len(gt_docs[i])} doc(s)")
 
-    ks = [3, 5, 10]
-    strategies = {
+    strategies: dict[str, Callable] = {
         "纯向量": run_vector_only,
         "混合(BM25+向量)": run_hybrid,
         "全链路(+rerank)": run_full_pipeline,
@@ -313,7 +287,6 @@ def main():
         print("=" * 60)
     print_table(all_results, ks, fmt=output_fmt)
 
-    # 找最优策略：以 MRR 为主要指标
     print("\n推荐配置:")
     best_strategy = max(
         all_results.keys(),

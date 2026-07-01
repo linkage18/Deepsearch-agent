@@ -200,14 +200,14 @@ RETRIEVAL_CONFIG = {
 
 ### 3.6 评测体系
 
-`app/evaluation/evaluate.py` — 20 条 ground truth 的自动评测脚本：
+`app/evaluation/evaluate.py` — 34 条 ground truth（8 主题簇），90 篇论文的自动评测脚本：
 
 ```python
-# 输出示例
+# 输出示例 (策略对比)
 Strategy             | Recall@3 | Recall@5 | MRR
-纯向量               | 0.1500   | 0.1500   | 0.1500
-混合(BM25+向量)      | 0.3750   | 0.3750   | 0.3917
-全链路(+rerank)      | 0.4000   | 0.4500   | 0.4167
+纯向量               | 0.8775   | 0.9085   | 0.8824
+混合(BM25+向量)      | 0.9534   | 0.9681   | 0.9706  ← 最佳
+全链路(+rerank)      | 0.8309   | 0.9069   | 0.8676
 ```
 
 ---

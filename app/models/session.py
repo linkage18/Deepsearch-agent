@@ -1,12 +1,17 @@
 """
-Session metadata store backed by SQLite.
+Session metadata store backed by SQLite with connection pooling.
 
 The original JSON file store loses updates under concurrent writes. SQLite gives
 this single-node project durable writes and transaction isolation without adding
 an external database service.
+
+Uses a thread-local connection pool to avoid creating a new connection on every
+call. Connections are lazily created and reused within the same thread; on async
+IO each coroutine runs on its own thread so thread-local isolation is correct.
 """
 
 import json
+import queue
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -15,11 +20,71 @@ from pathlib import Path
 from typing import Any, Iterator, Optional
 
 from app.config.paths import SESSIONS_DB_PATH
+from app.utils.logging import get_logger
 
+logger = get_logger(__name__)
 
 SESSION_DB_PATH = SESSIONS_DB_PATH
 _init_lock = threading.Lock()
 _initialized_paths: set[Path] = set()
+
+# Connection pool: each thread gets its own connection.
+# Pool size is the number of concurrent threads that can hold a connection.
+_connection_pool: queue.Queue[sqlite3.Connection] | None = None
+_pool_lock = threading.Lock()
+POOL_SIZE = 8
+
+
+def _get_connection() -> sqlite3.Connection:
+    """Get a connection from the pool, or create one if the pool is empty."""
+    global _connection_pool
+    if _connection_pool is None:
+        with _pool_lock:
+            if _connection_pool is None:
+                _connection_pool = queue.Queue(maxsize=POOL_SIZE)
+                for _ in range(POOL_SIZE):
+                    conn = _create_connection()
+                    _connection_pool.put(conn)
+
+    try:
+        conn = _connection_pool.get_nowait()
+        # Validate the connection is still alive
+        try:
+            conn.execute("SELECT 1")
+            return conn
+        except sqlite3.Error:
+            conn.close()
+    except queue.Empty:
+        pass
+
+    # Pool exhausted or connection dead; create a temporary one
+    return _create_connection()
+
+
+def _return_connection(conn: sqlite3.Connection) -> None:
+    """Return a connection to the pool, closing it if the pool is full."""
+    global _connection_pool
+    if _connection_pool is None:
+        conn.close()
+        return
+    try:
+        _connection_pool.put_nowait(conn)
+    except queue.Full:
+        conn.close()
+
+
+def _create_connection() -> sqlite3.Connection:
+    conn = sqlite3.connect(
+        str(SESSION_DB_PATH),
+        timeout=30,
+        isolation_level=None,
+        check_same_thread=False,
+    )
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
 
 
 def _now() -> str:
@@ -34,10 +99,8 @@ def _ensure_schema() -> None:
     with _init_lock:
         if resolved in _initialized_paths:
             return
-        conn = sqlite3.connect(str(SESSION_DB_PATH), timeout=30, isolation_level=None)
+        conn = _create_connection()
         try:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA busy_timeout=30000")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS sessions (
@@ -143,13 +206,11 @@ def _ensure_schema() -> None:
 @contextmanager
 def _connect() -> Iterator[sqlite3.Connection]:
     _ensure_schema()
-    conn = sqlite3.connect(str(SESSION_DB_PATH), timeout=30, isolation_level=None)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA busy_timeout=30000")
+    conn = _get_connection()
     try:
         yield conn
     finally:
-        conn.close()
+        _return_connection(conn)
 
 
 def _row_to_session(row: sqlite3.Row) -> dict[str, Any]:
@@ -585,3 +646,17 @@ def set_session_db_path(path: str | Path) -> None:
     global SESSION_DB_PATH
     SESSION_DB_PATH = Path(path)
     _initialized_paths.discard(SESSION_DB_PATH.resolve())
+
+
+def close_pool() -> None:
+    """Close all connections in the pool. Used by tests for cleanup."""
+    global _connection_pool
+    if _connection_pool is not None:
+        pool = _connection_pool
+        _connection_pool = None
+        while True:
+            try:
+                conn = pool.get_nowait()
+                conn.close()
+            except Exception:
+                break

@@ -13,24 +13,34 @@ import json
 import re
 from typing import Any
 
+from app.utils.logging import get_logger
 from app.models.session import (
     get_session,
     list_evidence_records,
     save_citation_check,
 )
 
+logger = get_logger(__name__)
+
 _EVIDENCE_PATTERN = re.compile(r'[\[【]证据:\s*([^\]】]+?)[\]】]')
 _SOURCE_PATTERN = re.compile(r'[\[【]来源:\s*([^\]】]+?)(?:,\s*p[.．]?\s*(\d+))?[\]】]')
 
+# 引用校验阈值（与 retrieval_config 保持一致）
+VERIFIED_THRESHOLD = 0.5
+LOW_CONFIDENCE_THRESHOLD = 0.25
+
 
 def _load_reranker():
+    """延迟加载 reranker 模型（模块级单例）。"""
     if not hasattr(_load_reranker, "_model"):
         try:
             from sentence_transformers import SentenceTransformer
             from app.config.retrieval_config import RETRIEVAL_CONFIG
             model_name = RETRIEVAL_CONFIG["rerank_model"]
             _load_reranker._model = SentenceTransformer(model_name)
-        except Exception:
+            logger.info("Reranker model loaded", extra={"model": model_name})
+        except Exception as exc:
+            logger.warning("Reranker model 加载失败", extra={"error": str(exc)})
             _load_reranker._model = None
     return _load_reranker._model
 
@@ -45,8 +55,24 @@ def _cosine_similarity(text_a: str, text_b: str) -> float | None:
         emb_b = model.encode(text_b, normalize_embeddings=True)
         import numpy as np
         return float(np.dot(emb_a, emb_b))
-    except Exception:
+    except Exception as exc:
+        logger.warning("相似度计算失败", extra={"error": str(exc)})
         return None
+
+
+def _classify_similarity(score: float | None) -> str:
+    """将相似度分数映射到 verified / low_confidence / unfounded。
+
+    当 score 为 None（模型不可用）时，返回 'unfounded' 而非 'verified'，
+    避免在模型加载失败时给出虚假的高置信度结果。
+    """
+    if score is None:
+        return "unfounded"
+    if score >= VERIFIED_THRESHOLD:
+        return "verified"
+    if score >= LOW_CONFIDENCE_THRESHOLD:
+        return "low_confidence"
+    return "unfounded"
 
 
 def extract_claims(report_text: str) -> list[dict[str, Any]]:
@@ -56,7 +82,6 @@ def extract_claims(report_text: str) -> list[dict[str, Any]]:
     Returns list of:
       {"sentence": "...", "evidence_ids": [...], "sources": [(title, page)]}
     """
-    # Split by CJK sentence-ending punctuation (NOT half-width period to avoid splitting on p.5 etc.)
     raw_sentences = re.split(r'(?<=[。！？!?])\s*', report_text)
     sentences = [s.strip() for s in raw_sentences if s.strip() and len(s.strip()) >= 10]
 
@@ -70,7 +95,6 @@ def extract_claims(report_text: str) -> list[dict[str, Any]]:
         if not evidence_ids and not source_matches:
             continue
 
-        # deduplicate by first 100 chars
         dedup_key = stripped[:100]
         if dedup_key in seen:
             continue
@@ -98,7 +122,7 @@ def verify_citations(
       2. Look up evidence_records for this thread/recent
       3. For each claim, match evidence by evidence_id or source
       4. Compute semantic similarity between claim context and evidence quote (MiniLM)
-      5. Classify: verified (≥0.5) / low_confidence (≥0.25) / unfounded (<0.25)
+      5. Classify: verified (>=0.5) / low_confidence (>=0.25) / unfounded (<0.25)
       6. Write to citation_checks table
 
     Returns verification stats.
@@ -125,7 +149,6 @@ def verify_citations(
             "details": [],
         }
 
-    # Build evidence lookup: evidence_id -> record
     evidence_records = list_evidence_records(limit=500)
     evidence_by_id: dict[str, dict[str, Any]] = {}
     evidence_by_source: dict[str, list[dict[str, Any]]] = {}
@@ -159,15 +182,7 @@ def verify_citations(
                     claim["sentence"][:300],
                     matched_quote[:300],
                 )
-                if similarity is not None:
-                    if similarity >= 0.5:
-                        status = "verified"
-                    elif similarity >= 0.25:
-                        status = "low_confidence"
-                    else:
-                        status = "unfounded"
-                else:
-                    status = "verified"  # model unavailable, trust the ID match
+                status = _classify_similarity(similarity)
                 break
 
         if status == "unfounded":
@@ -189,15 +204,7 @@ def verify_citations(
                             claim["sentence"][:300],
                             matched_quote[:300],
                         )
-                        if similarity is not None:
-                            if similarity >= 0.5:
-                                status = "verified"
-                            elif similarity >= 0.25:
-                                status = "low_confidence"
-                            else:
-                                status = "unfounded"
-                        else:
-                            status = "verified"
+                        status = _classify_similarity(similarity)
                         break
 
         save_citation_check(

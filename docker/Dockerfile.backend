@@ -1,38 +1,60 @@
-# === 后端 Dockerfile（单阶段构建） ===
+# === 后端 Dockerfile（两阶段构建） ===
 #
 # 构建：docker build -f docker/Dockerfile.backend -t deepsearch-backend .
-# 单阶段避免重复拉取 base image（两阶段需要拉两次 python:3.12-slim）
-# uv 用 pip 安装而非 COPY --from=ghcr.io（ghcr.io 在国内同样慢）
+#
+# 阶段一：构建环境（含编译工具链）
+# 阶段二：运行环境（仅运行时依赖，镜像小 ~1.5GB vs ~4GB）
 
-FROM python:3.12-slim
+# ============================================================
+# Stage 1: builder
+# ============================================================
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-# 安装编译依赖（torch/sentence-transformers 需要 gcc/g++）
+# 安装编译依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ && \
     rm -rf /var/lib/apt/lists/*
 
-# 安装 uv——用 pip 而非从 ghcr.io 复制
+# 安装 uv
 RUN pip install uv --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 先复制依赖声明，利用 Docker 层缓存
+# 复制依赖声明
 COPY pyproject.toml uv.lock ./
 
-# 安装依赖（含 sentence-transformers→torch，构建时安装一次，约 5-8 分钟）
-RUN uv sync --frozen --no-cache 2>&1
+# 安装依赖到系统 site-packages（无虚拟环境，减少层数）
+RUN uv pip install --system --no-cache -r pyproject.toml 2>&1
 
-# 预下载 embedding 和 reranker 模型，避免运行时从 HuggingFace 下载
-RUN .venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" 2>&1
+# 预下载 embedding/reranker 模型
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" 2>&1
 
-# 复制源码
+# ============================================================
+# Stage 2: runtime
+# ============================================================
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# 仅安装运行时需要的系统包
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# 从 builder 复制已安装的 Python 包
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# 复制应用源码
 COPY app/ ./app/
-COPY docs/ ./docs/
 COPY .env.example ./
 
-# 运行时目录
-RUN mkdir -p output updated app/storage
+# 创建运行时目录
+RUN mkdir -p /app/data/uploads /app/data/reports /app/data/papers /app/data/paper_index /app/data/model_cache
 
 EXPOSE 8000
 
-CMD [".venv/bin/uvicorn", "app.api.server:app", "--host", "0.0.0.0", "--port", "8000"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live').read()" || exit 1
+
+CMD ["python", "-m", "uvicorn", "app.api.server:app", "--host", "0.0.0.0", "--port", "8000"]
